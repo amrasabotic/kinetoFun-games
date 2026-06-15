@@ -54,65 +54,64 @@ export interface GameSettings {
   soundEnabled: boolean;
   musicEnabled: boolean;
   difficulty: Difficulty;
+  cameraEnabled: boolean;
 }
 
-// ─── Input system ───────────────────────────────────────────────────────────
+// ─── Input system — gesture-first, camera-ready ─────────────────────────────
 
+/**
+ * High-level cooking gesture events.
+ * ALL game logic depends on these — no mini-game reads DOM events directly.
+ * Input providers (MouseInputProvider, CameraInputProvider) emit into this bus.
+ *
+ * Architecture:  Camera / Mouse → Provider → InputManager → Game Logic
+ */
 export type GestureEventType =
-  | 'pointerMove'
-  | 'swipeDown'
-  | 'swipeUp'
-  | 'circularMotion'
-  | 'tap'
-  | 'dragStart'
-  | 'dragEnd';
+  | 'chop'        // cutting stroke segment         → VegetableChop
+  | 'stir'        // circular-motion frame update   → StirTheSoup
+  | 'flip'        // upward swipe gesture           → PancakeFlip
+  | 'place'       // tap / click to place item      → CakeDecoration
+  | 'drawStart'   // pointer pressed — start stroke → CakeDecoration frosting
+  | 'draw'        // pointer moved while pressed    → CakeDecoration frosting
+  | 'drawEnd'     // pointer released — end stroke  → CakeDecoration frosting
+  | 'pointerMove'; // raw cursor position           → cursor-trail rendering only
 
-export interface PointerMoveData {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
+export interface ChopData {
+  x: number; y: number;
+  prevX: number; prevY: number;
   speed: number;
 }
 
-export interface SwipeData {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  speed: number;
-}
-
-export interface CircularMotionData {
+export interface StirData {
   direction: 'cw' | 'ccw';
   deltaAngle: number;
   totalRotation: number;
-  x: number;
-  y: number;
-  centerX: number;
-  centerY: number;
+  x: number; y: number;
+  centerX: number; centerY: number;
 }
 
-export interface TapData {
-  x: number;
-  y: number;
-}
+export interface FlipData { speed: number; }
 
-export interface DragData {
-  x: number;
-  y: number;
-  startX: number;
-  startY: number;
+export interface PlaceData { x: number; y: number; }
+
+export interface DrawStartData { x: number; y: number; }
+export interface DrawData      { x: number; y: number; }
+export interface DrawEndData   { x: number; y: number; }
+
+export interface PointerMoveData {
+  x: number; y: number;
+  vx: number; vy: number; speed: number;
 }
 
 export type GestureEventDataMap = {
+  chop:        ChopData;
+  stir:        StirData;
+  flip:        FlipData;
+  place:       PlaceData;
+  drawStart:   DrawStartData;
+  draw:        DrawData;
+  drawEnd:     DrawEndData;
   pointerMove: PointerMoveData;
-  swipeDown: SwipeData;
-  swipeUp: SwipeData;
-  circularMotion: CircularMotionData;
-  tap: TapData;
-  dragStart: DragData;
-  dragEnd: DragData;
 };
 
 export type GestureHandler<T extends GestureEventType = GestureEventType> = (

@@ -3,6 +3,8 @@ import type { MinigameComponentProps } from './types';
 import { DIFFICULTY_SETTINGS } from '../../constants/gameConfig';
 import { randomBetween, randomInt, segmentIntersectsCircle } from '../../utils/mathUtils';
 import { audioManager } from '../../utils/audio';
+import { inputManager } from '../../input/InputManager';
+import { mouseInputProvider } from '../../input/MouseInputProvider';
 
 const VEGETABLES = [
   { emoji: '🥕', color: '#FF8C42', name: 'carrot' },
@@ -18,7 +20,7 @@ interface Veg {
   id: number;
   emoji: string;
   color: string;
-  x: number; y: number;       // canvas pixels
+  x: number; y: number;
   size: number;
   chopped: boolean;
   choppedAt: number;
@@ -53,7 +55,7 @@ interface GameRef {
 }
 
 export const VegetableChop: React.FC<MinigameComponentProps> = ({
-  difficulty, paused, onScore, onCombo,
+  difficulty, paused, cameraEnabled, onScore, onCombo,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gRef = useRef<GameRef>({
@@ -97,17 +99,15 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
     veg.choppedAt = performance.now();
     g.hasChopped = true;
 
-    // Compute chop direction perpendicular to mouse velocity
     const dx = mx - g.prevX; const dy = my - g.prevY;
     const len = Math.sqrt(dx * dx + dy * dy) || 1;
-    const px = -dy / len; const py = dx / len; // perpendicular
+    const px = -dy / len; const py = dx / len;
 
     veg.halves = [
       { x: veg.x + px * 8,  y: veg.y + py * 8,  vx: px * 3 - 2, vy: py * 3 - 4, angle: -0.4 },
       { x: veg.x - px * 8,  y: veg.y - py * 8,  vx: -px * 3 + 2, vy: -py * 3 - 4, angle: 0.4 },
     ];
 
-    // Juice particles
     for (let i = 0; i < 12; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = randomBetween(2, 7);
@@ -121,7 +121,6 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
 
     audioManager.chop();
 
-    // Combo
     const now = performance.now();
     if (now - g.comboTimer < 1800) {
       g.combo = Math.min(g.combo + 1, 8);
@@ -143,7 +142,49 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
     });
   }, [onScore, onCombo]);
 
-  // Canvas setup + game loop
+  // ─── Gesture input — attach provider based on input mode, subscribe to cooking events ───────────
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const g = gRef.current;
+
+    // Attach MouseInputProvider only if camera is not active.
+    // CameraInputProvider (when active) emits the same events through InputManager.
+    if (!cameraEnabled) {
+      mouseInputProvider.attach(canvas);
+    }
+
+    const unsubMove = inputManager.on('pointerMove', ({ x, y }) => {
+      g.prevX = g.mouseX; g.prevY = g.mouseY;
+      g.mouseX = x; g.mouseY = y;
+    });
+
+    const unsubDown = inputManager.on('drawStart', ({ x, y }) => {
+      g.isDown = true;
+      g.mouseX = x; g.mouseY = y;
+      g.prevX = x; g.prevY = y;
+    });
+
+    const unsubUp = inputManager.on('drawEnd', () => { g.isDown = false; });
+
+    const unsubChop = inputManager.on('chop', ({ x, y, prevX, prevY }) => {
+      if (pausedRef.current) return;
+      for (const veg of g.vegetables) {
+        if (!veg.chopped && segmentIntersectsCircle(prevX, prevY, x, y, veg.x, veg.y, veg.size * 0.55)) {
+          chopVeg(veg, x, y);
+        }
+      }
+    });
+
+    return () => {
+      if (!cameraEnabled) {
+        mouseInputProvider.detach();
+      }
+      unsubMove(); unsubDown(); unsubUp(); unsubChop();
+    };
+  }, [cameraEnabled]);
+
+  // ─── Canvas setup + render loop ─────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext('2d')!;
@@ -162,7 +203,6 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
     const cfg = DIFFICULTY_SETTINGS[difficulty];
     g.spawnInterval = Math.round(2200 / cfg.speedMultiplier);
 
-    // Spawn initial vegetables
     for (let i = 0; i < 4; i++) {
       setTimeout(() => spawnVeg(), i * 300);
     }
@@ -172,34 +212,20 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
       g.lastTime = timestamp;
 
       if (!pausedRef.current) {
-        // Spawn logic
+        // Spawn
         g.spawnTimer += dt;
         if (g.spawnTimer >= g.spawnInterval) {
           g.spawnTimer = 0;
           spawnVeg();
         }
 
-        // Check chop on mouse move
-        if (g.isDown) {
-          for (const veg of g.vegetables) {
-            if (!veg.chopped && segmentIntersectsCircle(
-              g.prevX, g.prevY, g.mouseX, g.mouseY,
-              veg.x, veg.y, veg.size * 0.55
-            )) {
-              chopVeg(veg, g.mouseX, g.mouseY);
-            }
-          }
-        }
-        g.prevX = g.mouseX;
-        g.prevY = g.mouseY;
-
-        // Update particles
+        // Physics — particles
         for (const p of g.particles) {
           p.x += p.vx; p.y += p.vy;
-          p.vy += 0.25; // gravity
+          p.vy += 0.25;
           p.life -= dt / (p.maxLife * 1000);
         }
-        // Update half-vegetable physics
+        // Physics — chopped halves
         const now2 = performance.now();
         for (const veg of g.vegetables) {
           if (!veg.chopped) continue;
@@ -210,10 +236,9 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
             h.vy += 0.3;
             h.angle += 0.08;
           }
-          // clean up old halves
           if (age > 1.5) veg.halves = [];
         }
-        // Prune particles and old vegetables
+        // Prune
         g.particles = g.particles.filter(p => p.life > 0);
         const now3 = performance.now();
         g.vegetables = g.vegetables.filter(
@@ -222,17 +247,15 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
         g.scorePops = g.scorePops.filter(s => s.life > 0);
         for (const s of g.scorePops) s.life -= dt / (s.maxLife * 1000);
 
-        // Combo timer decay
         if (now3 - g.comboTimer > 2000 && g.combo > 1) {
           g.combo = 1;
           onCombo(1);
         }
       }
 
-      // ─── Draw ───────────────────────────────────────────────────────────
+      // ─── Draw ─────────────────────────────────────────────────────────────
       const W = g.width; const H = g.height;
 
-      // Background: kitchen counter
       ctx.fillStyle = '#F4E6CC';
       ctx.fillRect(0, 0, W, H);
 
@@ -249,7 +272,7 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
       ctx.stroke();
       ctx.restore();
 
-      // Wood grain lines
+      // Wood grain
       ctx.save();
       ctx.globalAlpha = 0.15;
       ctx.strokeStyle = '#8B5E2A';
@@ -279,7 +302,6 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
       ctx.save();
       for (const veg of g.vegetables) {
         if (veg.chopped) {
-          // Draw flying halves
           for (let i = 0; i < veg.halves.length; i++) {
             const h = veg.halves[i];
             ctx.save();
@@ -293,14 +315,12 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
             ctx.restore();
           }
         } else {
-          // Floating bob animation
           const bob = Math.sin(performance.now() / 500 + veg.id) * 3;
           ctx.save();
           ctx.translate(veg.x, veg.y + bob);
           ctx.font = `${veg.size}px serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          // Shadow
           ctx.shadowColor = 'rgba(0,0,0,0.2)';
           ctx.shadowBlur = 8;
           ctx.shadowOffsetY = 4;
@@ -326,7 +346,7 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
       }
       ctx.restore();
 
-      // Cursor slash trail hint
+      // Cursor slash trail (visual only — no logic here)
       if (g.isDown) {
         ctx.save();
         ctx.strokeStyle = 'rgba(255,255,255,0.75)';
@@ -341,7 +361,7 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
         ctx.restore();
       }
 
-      // Gesture hint — animated drag guide until first chop
+      // First-chop gesture hint
       if (!g.hasChopped) {
         const hintAlpha = 0.55 + Math.sin(timestamp / 400) * 0.25;
         const hintProgress = ((timestamp / 1200) % 1);
@@ -390,52 +410,9 @@ export const VegetableChop: React.FC<MinigameComponentProps> = ({
 
     rafRef.current = requestAnimationFrame(loop);
 
-    // Mouse/touch events on canvas
-    const getPos = (e: MouseEvent | TouchEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      if ('touches' in e) {
-        const t = e.touches[0] ?? e.changedTouches[0];
-        return { x: t.clientX - rect.left, y: t.clientY - rect.top };
-      }
-      return { x: (e as MouseEvent).clientX - rect.left, y: (e as MouseEvent).clientY - rect.top };
-    };
-
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      e.preventDefault();
-      const { x, y } = getPos(e);
-      g.prevX = g.mouseX; g.prevY = g.mouseY;
-      g.mouseX = x; g.mouseY = y;
-    };
-    const onDown = (e: MouseEvent | TouchEvent) => {
-      e.preventDefault();
-      const { x, y } = getPos(e);
-      g.isDown = true;
-      g.mouseX = x; g.mouseY = y;
-      g.prevX = x; g.prevY = y;
-    };
-    const onUp = (e: MouseEvent | TouchEvent) => {
-      e.preventDefault();
-      g.isDown = false;
-    };
-
-    canvas.addEventListener('mousemove', onMove);
-    canvas.addEventListener('mousedown', onDown);
-    canvas.addEventListener('mouseup', onUp);
-    canvas.addEventListener('mouseleave', onUp);
-    canvas.addEventListener('touchmove', onMove, { passive: false });
-    canvas.addEventListener('touchstart', onDown, { passive: false });
-    canvas.addEventListener('touchend', onUp, { passive: false });
-
     return () => {
       cancelAnimationFrame(rafRef.current);
       ro.disconnect();
-      canvas.removeEventListener('mousemove', onMove);
-      canvas.removeEventListener('mousedown', onDown);
-      canvas.removeEventListener('mouseup', onUp);
-      canvas.removeEventListener('mouseleave', onUp);
-      canvas.removeEventListener('touchmove', onMove);
-      canvas.removeEventListener('touchstart', onDown);
-      canvas.removeEventListener('touchend', onUp);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [difficulty]);

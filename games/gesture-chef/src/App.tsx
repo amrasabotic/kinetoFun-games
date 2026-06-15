@@ -8,6 +8,7 @@ import { MinigameWrapper } from './components/minigames/MinigameWrapper';
 import { audioManager } from './utils/audio';
 import { saveProgress } from './utils/storage';
 import { DEFAULT_PROGRESS } from './utils/storage';
+import { cameraInputProvider } from './input/CameraInputProvider';
 import type { Difficulty } from './types';
 
 export default function App() {
@@ -22,6 +23,25 @@ export default function App() {
     audioManager.setSoundEnabled(settings.soundEnabled);
     audioManager.setMusicEnabled(settings.musicEnabled);
   }, [settings.soundEnabled, settings.musicEnabled]);
+
+  // Manage camera input provider lifecycle
+  useEffect(() => {
+    const shouldRunCamera = screen === 'playing' && settings.cameraEnabled;
+
+    if (shouldRunCamera && !cameraInputProvider.isActive()) {
+      cameraInputProvider.start().catch(err => {
+        console.error('Failed to start camera:', err);
+      });
+    } else if (!shouldRunCamera && cameraInputProvider.isActive()) {
+      cameraInputProvider.stop();
+    }
+
+    return () => {
+      if (cameraInputProvider.isActive()) {
+        cameraInputProvider.stop();
+      }
+    };
+  }, [screen, settings.cameraEnabled]);
 
   const handleDifficultyChange = (d: Difficulty) => {
     updateSettings({ ...settings, difficulty: d });
@@ -67,6 +87,7 @@ export default function App() {
           totalMinigames={selectedRecipe.minigames.length}
           recipeName={selectedRecipe.name}
           difficulty={settings.difficulty}
+          cameraEnabled={settings.cameraEnabled}
           onComplete={completeMinigame}
         />
       )}

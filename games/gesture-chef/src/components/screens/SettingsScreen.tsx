@@ -149,6 +149,39 @@ export const SettingsScreen: React.FC<Props> = ({
           </div>
         </section>
 
+        {/* Camera & Gestures */}
+        <section>
+          <h3 style={{ margin: '0 0 12px', color: '#666', fontSize: '0.85rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1 }}>
+            Input Method
+          </h3>
+          <div style={{
+            background: '#fff', borderRadius: 20,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
+            overflow: 'hidden',
+          }}>
+            <Toggle
+              label="Hand Gestures (Camera)"
+              emoji="🤚"
+              value={settings.cameraEnabled}
+              onChange={v => {
+                update({ cameraEnabled: v });
+                if (v) audioManager.tick();
+              }}
+            />
+            <div style={{ height: 1, background: '#f0f0f0', margin: '0 16px' }} />
+            <div style={{
+              padding: '12px 20px',
+              fontSize: '0.85rem',
+              color: '#888',
+              background: 'rgba(0,0,0,0.02)',
+            }}>
+              {settings.cameraEnabled
+                ? '🎥 Camera active — use hand gestures to cook!'
+                : '🖱️ Mouse/Touch active — drag, click, and swipe to cook'}
+            </div>
+          </div>
+        </section>
+
         {/* Progress */}
         <section>
           <h3 style={{ margin: '0 0 12px', color: '#666', fontSize: '0.85rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1 }}>
@@ -174,7 +207,7 @@ export const SettingsScreen: React.FC<Props> = ({
         {/* Credits */}
         <div style={{ textAlign: 'center', color: '#BBA', fontSize: '0.8rem', fontWeight: 600 }}>
           Gesture Chef · KinetoFun Platform<br />
-          MediaPipe gesture control coming soon!
+          🤚 Hand gesture recognition powered by MediaPipe
         </div>
       </div>
     </div>

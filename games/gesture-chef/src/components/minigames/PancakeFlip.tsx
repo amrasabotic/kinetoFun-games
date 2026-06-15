@@ -2,24 +2,26 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { MinigameComponentProps } from './types';
 import { DIFFICULTY_SETTINGS } from '../../constants/gameConfig';
 import { audioManager } from '../../utils/audio';
+import { inputManager } from '../../input/InputManager';
+import { mouseInputProvider } from '../../input/MouseInputProvider';
 
 type PancakePhase = 'cooking' | 'ready' | 'flipping' | 'landing' | 'done-perfect' | 'done-good' | 'done-miss';
 
 interface PancakeState {
   phase: PancakePhase;
-  cookProgress: number;  // 0-1
-  flipAngle: number;     // deg for 3D rotation
+  cookProgress: number;
+  flipAngle: number;
   index: number;
   totalFlips: number;
 }
 
 const TOTAL_PANCAKES = 4;
-const COOK_SPEED = 0.008;          // per frame at normal difficulty
-const PERFECT_WINDOW = [0.75, 0.9]; // cook progress range for perfect flip
+const COOK_SPEED = 0.008;
+const PERFECT_WINDOW = [0.75, 0.9];
 const GOOD_WINDOW = [0.6, 0.95];
 
 export const PancakeFlip: React.FC<MinigameComponentProps> = ({
-  difficulty, paused, onScore, onCombo,
+  difficulty, paused, cameraEnabled, onScore, onCombo,
 }) => {
   const [pancake, setPancake] = useState<PancakeState>({
     phase: 'cooking', cookProgress: 0, flipAngle: 0, index: 0, totalFlips: 0,
@@ -34,7 +36,6 @@ export const PancakeFlip: React.FC<MinigameComponentProps> = ({
   const comboRef = useRef(1);
   const rafRef = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
-  const lastDownRef = useRef({ x: 0, y: 0, t: 0 });
 
   const cfg = DIFFICULTY_SETTINGS[difficulty];
   const cookSpeed = COOK_SPEED * cfg.speedMultiplier;
@@ -96,7 +97,6 @@ export const PancakeFlip: React.FC<MinigameComponentProps> = ({
     const newIndex = p.index + 1;
     const isLast = newIndex >= TOTAL_PANCAKES;
 
-    // Flip animation
     setPancake(prev => ({ ...prev, phase: 'flipping', flipAngle: 0 }));
 
     let angle = 0;
@@ -113,7 +113,6 @@ export const PancakeFlip: React.FC<MinigameComponentProps> = ({
             flipAngle: 0, index: newIndex,
           }));
         } else {
-          // Next pancake
           setTimeout(() => {
             setPancake({ phase: 'cooking', cookProgress: 0, flipAngle: 0, index: newIndex, totalFlips: newIndex });
             comboRef.current = result === 'miss' ? 1 : comboRef.current;
@@ -124,41 +123,33 @@ export const PancakeFlip: React.FC<MinigameComponentProps> = ({
     requestAnimationFrame(flipLoop);
   }, [onScore, onCombo]);
 
-  // Mouse/touch swipe up detection
+  // ─── Gesture input — FLIP event + keyboard fallback ─────────────────────────
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    const onDown = (e: MouseEvent | TouchEvent) => {
-      const { y, x } = getPos(e, el);
-      lastDownRef.current = { x, y, t: performance.now() };
-    };
-
-    const onUp = (e: MouseEvent | TouchEvent) => {
-      const { y, x } = getPos(e, el);
-      const { y: dy, x: dx, t } = lastDownRef.current;
-      const dt = performance.now() - t;
-      const diffY = dy - y; // positive = upward swipe
-      const diffX = Math.abs(x - dx);
-      if (dt < 400 && diffY > 40 && diffY > diffX * 1.2) {
-        doFlip();
+    if (!cameraEnabled) {
+      mouseInputProvider.attach(container);
+    }
+    return () => {
+      if (!cameraEnabled) {
+        mouseInputProvider.detach();
       }
     };
+  }, [cameraEnabled]);
 
+  useEffect(() => {
+    // Subscribe to the FLIP cooking gesture
+    const unsubFlip = inputManager.on('flip', doFlip);
+
+    // Keyboard remains as accessibility fallback (not a mouse event)
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); doFlip(); }
     };
-
-    el.addEventListener('mousedown', onDown);
-    el.addEventListener('mouseup', onUp);
-    el.addEventListener('touchstart', onDown, { passive: true });
-    el.addEventListener('touchend', onUp, { passive: true });
     window.addEventListener('keydown', onKey);
+
     return () => {
-      el.removeEventListener('mousedown', onDown);
-      el.removeEventListener('mouseup', onUp);
-      el.removeEventListener('touchstart', onDown);
-      el.removeEventListener('touchend', onUp);
+      unsubFlip();
       window.removeEventListener('keydown', onKey);
     };
   }, [doFlip]);
@@ -169,7 +160,7 @@ export const PancakeFlip: React.FC<MinigameComponentProps> = ({
     if (p < 0.6) return '#FFC050';
     if (p < 0.75) return '#E8A030';
     if (p < 0.9) return '#D4862A';
-    return '#8B4513'; // burnt
+    return '#8B4513';
   };
 
   const isReady = pancake.phase === 'ready';
@@ -205,7 +196,6 @@ export const PancakeFlip: React.FC<MinigameComponentProps> = ({
 
       {/* Stove + pan */}
       <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 2 }}>
-        {/* Pan */}
         <div style={{
           position: 'relative',
           width: 'clamp(200px,36vw,280px)',
@@ -227,7 +217,6 @@ export const PancakeFlip: React.FC<MinigameComponentProps> = ({
             border: '3px solid #444',
             overflow: 'hidden',
           }}>
-            {/* Pancake */}
             {(pancake.phase === 'cooking' || pancake.phase === 'ready') && !isFlipping && (
               <div style={{
                 position: 'absolute', left: '15%', right: '15%', top: '10%', bottom: '10%',
@@ -242,7 +231,6 @@ export const PancakeFlip: React.FC<MinigameComponentProps> = ({
                 {isReady && '✨'}
               </div>
             )}
-            {/* Sizzle effect */}
             {pancake.phase === 'cooking' && (
               <div style={{
                 position: 'absolute', inset: 0,
@@ -272,20 +260,17 @@ export const PancakeFlip: React.FC<MinigameComponentProps> = ({
           background: '#555', borderRadius: '4px 4px 0 0',
           boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
         }} />
-        <div style={{
-          width: 'clamp(280px,50vw,380px)', height: 12,
-          background: '#444', borderRadius: 4,
-        }} />
+        <div style={{ width: 'clamp(280px,50vw,380px)', height: 12, background: '#444', borderRadius: 4 }} />
       </div>
 
-      {/* Cook progress indicator */}
+      {/* Cook progress bar */}
       {(pancake.phase === 'cooking' || pancake.phase === 'ready') && (
         <div style={{ width: 'clamp(180px,38vw,300px)', zIndex: 2 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#AA7744', textAlign: 'center' }}>🔥 wait...</div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#AA7744' }}>🔥 wait...</div>
             <span style={{ fontSize: '0.9rem', fontWeight: 800, color: '#AA7744', flex: 1, textAlign: 'center' }}>{Math.round(pancake.cookProgress * 100)}%</span>
-            <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#FFD700', textAlign: 'center' }}>⭐ FLIP</div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#FF4444', textAlign: 'center' }}>🔥 burnt!</div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#FFD700' }}>⭐ FLIP</div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#FF4444' }}>🔥 burnt!</div>
           </div>
           <div style={{
             height: 22, background: 'rgba(0,0,0,0.1)', borderRadius: 11,
@@ -316,11 +301,9 @@ export const PancakeFlip: React.FC<MinigameComponentProps> = ({
         </div>
       )}
 
-      {/* Flip prompt — always visible during cooking/ready */}
+      {/* Flip prompt */}
       {(pancake.phase === 'cooking' || pancake.phase === 'ready') && (
-        <div style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, zIndex: 2,
-        }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, zIndex: 2 }}>
           <div style={{
             fontSize: 'clamp(1.6rem,4vw,2.4rem)',
             fontWeight: 900,
@@ -404,12 +387,3 @@ export const PancakeFlip: React.FC<MinigameComponentProps> = ({
     </div>
   );
 };
-
-function getPos(e: MouseEvent | TouchEvent, el: HTMLElement): { x: number; y: number } {
-  const rect = el.getBoundingClientRect();
-  if ('touches' in e) {
-    const t = e.touches[0] ?? e.changedTouches[0];
-    return { x: t.clientX - rect.left, y: t.clientY - rect.top };
-  }
-  return { x: (e as MouseEvent).clientX - rect.left, y: (e as MouseEvent).clientY - rect.top };
-}

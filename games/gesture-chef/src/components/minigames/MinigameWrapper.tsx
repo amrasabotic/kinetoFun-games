@@ -10,13 +10,14 @@ interface Props {
   totalMinigames: number;
   recipeName: string;
   difficulty: Difficulty;
+  cameraEnabled: boolean;
   onComplete: (result: MinigameResult) => void;
 }
 
 type Phase = 'intro' | 'countdown' | 'playing' | 'finishing';
 
 export const MinigameWrapper: React.FC<Props> = ({
-  minigameType, minigameIndex, totalMinigames, recipeName, difficulty, onComplete,
+  minigameType, minigameIndex, totalMinigames, recipeName, difficulty, cameraEnabled, onComplete,
 }) => {
   const [phase, setPhase] = useState<Phase>('intro');
   const [countdown, setCountdown] = useState(3);
@@ -116,6 +117,7 @@ export const MinigameWrapper: React.FC<Props> = ({
         <MinigameComponent
           difficulty={difficulty}
           paused={paused}
+          cameraEnabled={cameraEnabled}
           onScore={handleScore}
           onCombo={handleCombo}
           onTimeUp={handleTimeUp}

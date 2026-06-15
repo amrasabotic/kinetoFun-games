@@ -1,6 +1,8 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import type { MinigameComponentProps } from './types';
 import { audioManager } from '../../utils/audio';
+import { inputManager } from '../../input/InputManager';
+import { mouseInputProvider } from '../../input/MouseInputProvider';
 
 interface Decoration {
   id: number;
@@ -31,7 +33,7 @@ const TOOLS = [
 const FROSTING_COLORS = ['#FFB6C1', '#98FB98', '#87CEEB', '#FFD700', '#DDA0DD'];
 
 export const CakeDecoration: React.FC<MinigameComponentProps> = ({
-  paused, onScore, onCombo,
+  paused, cameraEnabled, onScore, onCombo,
 }) => {
   const [selectedTool, setSelectedTool] = useState<string | null>(TOOLS[0].id);
   const [decorations, setDecorations] = useState<Decoration[]>([]);
@@ -46,14 +48,18 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
   const currentPathRef = useRef<{ x: number; y: number }[]>([]);
   const comboRef = useRef(1);
   const comboTimerRef = useRef(0);
-  const decorCountRef = useRef(0);
   const pausedRef = useRef(paused);
   const nextIdRef = useRef(0);
   const nextSparkleId = useRef(0);
+  // Track selectedTool in a ref so gesture callbacks always have current value
+  const selectedToolRef = useRef(selectedTool);
+  const frostingColorRef = useRef(frostingColor);
 
   useEffect(() => { pausedRef.current = paused; }, [paused]);
+  useEffect(() => { selectedToolRef.current = selectedTool; }, [selectedTool]);
+  useEffect(() => { frostingColorRef.current = frostingColor; }, [frostingColor]);
 
-  // Draw frosting on canvas
+  // Redraw frosting paths on canvas
   const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -89,31 +95,29 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
     setTimeout(() => setSparkles(prev => prev.filter(s => s.id !== id)), 600);
   };
 
-  const placeDecoration = useCallback((clientX: number, clientY: number) => {
-    if (pausedRef.current || !selectedTool) return;
-    if (selectedTool === 'frosting') return;
+  // ─── Gameplay actions — all coordinates are element-relative ───────────────
+  // (MouseInputProvider computes them relative to the attached cakeRef element)
+
+  const placeDecoration = useCallback((x: number, y: number) => {
+    if (pausedRef.current) return;
+    const tool = selectedToolRef.current;
+    if (!tool || tool === 'frosting') return;
 
     const cake = cakeRef.current;
     if (!cake) return;
-    const rect = cake.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
+    if (x < 0 || y < 0 || x > cake.offsetWidth || y > cake.offsetHeight) return;
 
-    // Only place within cake bounds
-    if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
-
-    const tool = TOOLS.find(t => t.id === selectedTool);
-    if (!tool) return;
+    const toolDef = TOOLS.find(t => t.id === tool);
+    if (!toolDef) return;
 
     setDecorations(prev => [...prev, {
       id: nextIdRef.current++,
-      emoji: tool.emoji,
+      emoji: toolDef.emoji,
       x, y,
       size: 32 + Math.random() * 16,
       rotation: (Math.random() - 0.5) * 30,
     }]);
 
-    decorCountRef.current++;
     audioManager.decorate();
     addSparkle(x, y);
 
@@ -127,32 +131,23 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
     setComboState(comboRef.current);
     onCombo(comboRef.current);
 
-    const pts = tool.pts * comboRef.current;
+    const pts = toolDef.pts * comboRef.current;
     onScore(pts);
-  }, [selectedTool, onScore, onCombo]);
+  }, [onScore, onCombo]);
 
-  // Frosting drawing on canvas
-  const startFrosting = useCallback((clientX: number, clientY: number) => {
-    if (!cakeRef.current || selectedTool !== 'frosting') return;
-    const rect = cakeRef.current.getBoundingClientRect();
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
+  const startFrosting = useCallback((x: number, y: number) => {
+    if (selectedToolRef.current !== 'frosting') return;
+    const cake = cakeRef.current;
+    if (!cake) return;
+    if (x < 0 || y < 0 || x > cake.offsetWidth || y > cake.offsetHeight) return;
     isDrawingRef.current = true;
-    // drawing started (tracked via ref)
     currentPathRef.current = [{ x, y }];
-  }, [selectedTool]);
+  }, []);
 
-  const continueFrosting = useCallback((clientX: number, clientY: number) => {
-    if (!isDrawingRef.current || !cakeRef.current) return;
-    const rect = cakeRef.current.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
+  const continueFrosting = useCallback((x: number, y: number) => {
+    if (!isDrawingRef.current) return;
     currentPathRef.current = [...currentPathRef.current, { x, y }];
 
-    // Draw in-progress on canvas
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
@@ -162,7 +157,7 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
     ctx.beginPath();
     ctx.moveTo(pts[pts.length - 2].x, pts[pts.length - 2].y);
     ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
-    ctx.strokeStyle = frostingColor;
+    ctx.strokeStyle = frostingColorRef.current;
     ctx.lineWidth = 14;
     ctx.lineCap = 'round';
     ctx.globalAlpha = 0.85;
@@ -170,63 +165,58 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
     ctx.restore();
 
     audioManager.stir();
-  }, [frostingColor]);
+  }, []);
 
   const endFrosting = useCallback(() => {
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
-    // drawing ended (tracked via ref)
     if (currentPathRef.current.length > 2) {
       setFrostingPaths(prev => [...prev, {
         points: currentPathRef.current,
-        color: frostingColor,
+        color: frostingColorRef.current,
         width: 14,
       }]);
       onScore(10);
     }
     currentPathRef.current = [];
-  }, [frostingColor, onScore]);
+  }, [onScore]);
 
-  // Cake interaction events
+  // ─── Attach input provider + subscribe to cooking gesture events ────────────
   useEffect(() => {
     const cake = cakeRef.current;
     if (!cake) return;
 
-    const onDown = (e: MouseEvent | TouchEvent) => {
-      e.preventDefault();
-      if (pausedRef.current) return;
-      const { x, y } = cPos(e);
-      if (selectedTool === 'frosting') startFrosting(x, y);
-      else placeDecoration(x, y);
-    };
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      e.preventDefault();
-      if (pausedRef.current) return;
-      const { x, y } = cPos(e);
-      if (selectedTool === 'frosting') continueFrosting(x, y);
-    };
-    const onUp = (e: MouseEvent | TouchEvent) => {
-      e.preventDefault();
-      endFrosting();
-    };
-
-    cake.addEventListener('mousedown', onDown);
-    cake.addEventListener('mousemove', onMove);
-    cake.addEventListener('mouseup', onUp);
-    cake.addEventListener('mouseleave', onUp);
-    cake.addEventListener('touchstart', onDown, { passive: false });
-    cake.addEventListener('touchmove', onMove, { passive: false });
-    cake.addEventListener('touchend', onUp, { passive: false });
+    if (!cameraEnabled) {
+      mouseInputProvider.attach(cake);
+    }
     return () => {
-      cake.removeEventListener('mousedown', onDown);
-      cake.removeEventListener('mousemove', onMove);
-      cake.removeEventListener('mouseup', onUp);
-      cake.removeEventListener('mouseleave', onUp);
-      cake.removeEventListener('touchstart', onDown);
-      cake.removeEventListener('touchmove', onMove);
-      cake.removeEventListener('touchend', onUp);
+      if (!cameraEnabled) {
+        mouseInputProvider.detach();
+      }
     };
-  }, [selectedTool, placeDecoration, startFrosting, continueFrosting, endFrosting]);
+  }, [cameraEnabled]);
+
+  useEffect(() => {
+    // PLACE gesture — quick tap/click on the cake → place a decoration
+    const unsubPlace = inputManager.on('place', ({ x, y }) => {
+      placeDecoration(x, y);
+    });
+
+    // DRAW* gestures — frosting strokes
+    const unsubDrawStart = inputManager.on('drawStart', ({ x, y }) => {
+      startFrosting(x, y);
+    });
+    const unsubDraw = inputManager.on('draw', ({ x, y }) => {
+      continueFrosting(x, y);
+    });
+    const unsubDrawEnd = inputManager.on('drawEnd', () => {
+      endFrosting();
+    });
+
+    return () => {
+      unsubPlace(); unsubDrawStart(); unsubDraw(); unsubDrawEnd();
+    };
+  }, [placeDecoration, startFrosting, continueFrosting, endFrosting]);
 
   // Resize canvas to match cake element
   useEffect(() => {
@@ -260,7 +250,7 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
         top: '50%', transform: 'translateY(-50%)',
         display: 'flex', flexDirection: 'column', gap: 8, zIndex: 10,
       }}>
-        {/* Frosting tool */}
+        {/* Frosting color swatches */}
         <div>
           <div style={{ fontSize: '0.6rem', fontWeight: 700, color: '#BB88AA', textAlign: 'center', marginBottom: 4 }}>
             FROSTING
@@ -271,8 +261,10 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
               onClick={() => { setSelectedTool('frosting'); setFrostingColor(color); audioManager.tick(); }}
               style={{
                 width: 32, height: 32, borderRadius: '50%',
-                background: color, border: `3px solid ${selectedTool === 'frosting' && frostingColor === color ? '#333' : 'transparent'}`,
-                cursor: 'pointer', margin: 2, boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+                background: color,
+                border: `3px solid ${selectedTool === 'frosting' && frostingColor === color ? '#333' : 'transparent'}`,
+                cursor: 'pointer', margin: 2,
+                boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
                 display: 'block',
               }}
             />
@@ -297,7 +289,9 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
               fontSize: 'clamp(1rem,2.5vw,1.5rem)',
               transform: selectedTool === tool.id ? 'scale(1.1)' : 'scale(1)',
               transition: 'all 0.15s ease',
-              boxShadow: selectedTool === tool.id ? '0 4px 12px rgba(255,107,53,0.3)' : '0 2px 6px rgba(0,0,0,0.1)',
+              boxShadow: selectedTool === tool.id
+                ? '0 4px 12px rgba(255,107,53,0.3)'
+                : '0 2px 6px rgba(0,0,0,0.1)',
               animation: tool.id === TOOLS[0].id && decorations.length === 0
                 ? 'toolPulse 1.2s ease-in-out infinite'
                 : undefined,
@@ -310,14 +304,14 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
       </div>
 
       {/* Cake canvas area */}
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, zIndex: 5,
-      }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, zIndex: 5 }}>
         <div style={{ fontWeight: 800, fontSize: 'clamp(1rem,2vw,1.3rem)', color: '#BB44AA' }}>
           {selectedTool
             ? `${selectedTool === 'frosting'
                 ? '🎨 Frosting — drag on the cake!'
-                : (TOOLS.find(t => t.id === selectedTool)?.emoji ?? '') + ' ' + (TOOLS.find(t => t.id === selectedTool)?.label ?? '') + ' — click the cake to place!'}`
+                : (TOOLS.find(t => t.id === selectedTool)?.emoji ?? '') + ' ' +
+                  (TOOLS.find(t => t.id === selectedTool)?.label ?? '') +
+                  ' — click the cake to place!'}`
             : '👆 Pick a tool from the left palette!'}
         </div>
 
@@ -337,7 +331,6 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
             display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
             borderRadius: 16, overflow: 'hidden',
           }}>
-            {/* Bottom layer — cake body */}
             <div style={{
               width: '100%', height: '70%',
               background: 'linear-gradient(180deg, #F5C77E 0%, #E8A050 100%)',
@@ -345,7 +338,6 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
               boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
               position: 'relative',
             }}>
-              {/* Horizontal layer lines */}
               {[33, 66].map(pct => (
                 <div key={pct} style={{
                   position: 'absolute', top: `${pct}%`,
@@ -354,23 +346,17 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
                 }} />
               ))}
             </div>
-            {/* White frosting top */}
             <div style={{
-              position: 'absolute', top: '28%', left: 0, right: 0,
-              height: '8%',
+              position: 'absolute', top: '28%', left: 0, right: 0, height: '8%',
               background: 'linear-gradient(180deg, #fff 0%, #f8e8e8 100%)',
               filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
             }} />
           </div>
 
-          {/* Frosting canvas layer */}
+          {/* Frosting canvas */}
           <canvas
             ref={canvasRef}
-            style={{
-              position: 'absolute', inset: 0,
-              pointerEvents: 'none',
-              borderRadius: 16,
-            }}
+            style={{ position: 'absolute', inset: 0, pointerEvents: 'none', borderRadius: 16 }}
           />
 
           {/* Placed decorations */}
@@ -402,7 +388,7 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
           ))}
         </div>
 
-        {/* Decoration count */}
+        {/* Decoration count + combo */}
         <div style={{
           fontWeight: 800, fontSize: '0.9rem', color: '#BB44AA',
           display: 'flex', gap: 12, alignItems: 'center',
@@ -441,11 +427,3 @@ export const CakeDecoration: React.FC<MinigameComponentProps> = ({
     </div>
   );
 };
-
-function cPos(e: MouseEvent | TouchEvent): { x: number; y: number } {
-  if ('touches' in e) {
-    const t = e.touches[0] ?? e.changedTouches[0];
-    return { x: t.clientX, y: t.clientY };
-  }
-  return { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY };
-}

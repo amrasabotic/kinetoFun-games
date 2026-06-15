@@ -1,13 +1,13 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import type { MinigameComponentProps } from './types';
-// DIFFICULTY_SETTINGS available for future speed scaling via MediaPipe provider
-import { distance, angleDelta } from '../../utils/mathUtils';
 import { audioManager } from '../../utils/audio';
+import { inputManager } from '../../input/InputManager';
+import { mouseInputProvider } from '../../input/MouseInputProvider';
 
 interface Bubble { id: number; x: number; y: number; size: number; speed: number; }
 
 export const StirTheSoup: React.FC<MinigameComponentProps> = ({
-  difficulty, paused, onScore, onCombo,
+  difficulty, paused, cameraEnabled, onScore, onCombo,
 }) => {
   const [stirProgress, setStirProgress] = useState(0);
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
@@ -19,18 +19,13 @@ export const StirTheSoup: React.FC<MinigameComponentProps> = ({
   const potRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef(0);
   const comboRef = useRef(1);
-  const isDownRef = useRef(false);
-  const lastAngleRef = useRef(0);
-  const totalRotRef = useRef(0);
-  const nextBubbleId = useRef(0);
   const stirSoundTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pausedRef = useRef(paused);
 
   useEffect(() => { pausedRef.current = paused; }, [paused]);
-
   void difficulty;
 
-  // Add-ingredient phase auto-advance
+  // Add-ingredient phase — auto-advance
   useEffect(() => {
     if (phase !== 'add-ingredients') return;
     const items = [0, 1, 2, 3];
@@ -47,6 +42,7 @@ export const StirTheSoup: React.FC<MinigameComponentProps> = ({
   // Bubble spawning
   useEffect(() => {
     if (phase !== 'stir') return;
+    const nextBubbleId = { current: 0 };
     const t = setInterval(() => {
       if (pausedRef.current) return;
       const rate = 0.3 + progressRef.current * 0.7;
@@ -75,87 +71,80 @@ export const StirTheSoup: React.FC<MinigameComponentProps> = ({
     return () => clearInterval(t);
   }, []);
 
-  // Mouse circular motion detection
+  // Pot centre relative to the container (used for circular tracking)
   const getPotCenter = useCallback(() => {
     const pot = potRef.current;
-    if (!pot) return { cx: 0, cy: 0 };
-    const rect = pot.getBoundingClientRect();
-    return { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 };
+    const container = containerRef.current;
+    if (!pot || !container) return { cx: 0, cy: 0 };
+    const potRect = pot.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    return {
+      cx: potRect.left + potRect.width / 2 - containerRect.left,
+      cy: potRect.top + potRect.height / 2 - containerRect.top,
+    };
   }, []);
+
+  // ─── Attach input provider + subscribe to STIR gesture ─────────────────────
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (!cameraEnabled) {
+      mouseInputProvider.attach(container);
+    }
+    return () => {
+      if (!cameraEnabled) {
+        mouseInputProvider.detach();
+      }
+    };
+  }, [cameraEnabled]);
 
   useEffect(() => {
     if (phase !== 'stir') return;
-    const el = containerRef.current;
-    if (!el) return;
 
-    const onDown = (e: MouseEvent | TouchEvent) => {
-      if (pausedRef.current) return;
-      isDownRef.current = true;
-      const { cx, cy } = getPotCenter();
-      const { x, y } = getClientPos(e);
-      lastAngleRef.current = Math.atan2(y - cy, x - cx);
-      totalRotRef.current = 0;
-    };
+    // Tell InputManager where the pot is so MouseInputProvider can compute
+    // angular deltas relative to it when it detects circular motion.
+    const { cx, cy } = getPotCenter();
+    inputManager.enableCircularTracking(cx, cy);
 
-    const onUp = () => {
-      isDownRef.current = false;
+    // STIR gesture — emitted by MouseInputProvider on circular motion around cx/cy.
+    // CameraInputProvider will emit the same event when implemented.
+    const unsubStir = inputManager.on('stir', ({ deltaAngle }) => {
+      if (pausedRef.current || progressRef.current >= 1) return;
+      setStirring(true);
+      const increment = Math.abs(deltaAngle) / (Math.PI * 2) * 0.12;
+      const newProg = Math.min(1, progressRef.current + increment);
+      progressRef.current = newProg;
+      setStirProgress(newProg);
+
+      if (newProg >= 1) {
+        setPhase('done');
+        onScore(150);
+        audioManager.complete();
+      }
+      if (!stirSoundTimer.current) {
+        stirSoundTimer.current = setInterval(() => audioManager.stir(), 200);
+      }
+    });
+
+    const unsubUp = inputManager.on('drawEnd', () => {
       setStirring(false);
       if (stirSoundTimer.current) { clearInterval(stirSoundTimer.current); stirSoundTimer.current = null; }
-    };
-
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      if (!isDownRef.current || pausedRef.current) return;
-      const { cx, cy } = getPotCenter();
-      const { x, y } = getClientPos(e);
-      const dist = distance(x, y, cx, cy);
-      if (dist < 30) return; // too close to center, ignore
-      const ang = Math.atan2(y - cy, x - cx);
-      const delta = angleDelta(lastAngleRef.current, ang);
-      lastAngleRef.current = ang;
-      totalRotRef.current += Math.abs(delta);
-
-      if (Math.abs(delta) > 0.02) {
-        setStirring(true);
-        const increment = Math.abs(delta) / (Math.PI * 2) * 0.12;
-        progressRef.current = Math.min(1, progressRef.current + increment);
-        setStirProgress(progressRef.current);
-
-        if (progressRef.current >= 1 && phase === 'stir') {
-          setPhase('done');
-          onScore(150);
-          audioManager.complete();
-        }
-        if (!stirSoundTimer.current) {
-          stirSoundTimer.current = setInterval(() => audioManager.stir(), 200);
-        }
-      }
-    };
-
-    el.addEventListener('mousedown', onDown);
-    el.addEventListener('mouseup', onUp);
-    el.addEventListener('mousemove', onMove);
-    el.addEventListener('touchstart', onDown, { passive: true });
-    el.addEventListener('touchend', onUp);
-    el.addEventListener('touchmove', onMove, { passive: true });
+    });
 
     return () => {
-      el.removeEventListener('mousedown', onDown);
-      el.removeEventListener('mouseup', onUp);
-      el.removeEventListener('mousemove', onMove);
-      el.removeEventListener('touchstart', onDown);
-      el.removeEventListener('touchend', onUp);
-      el.removeEventListener('touchmove', onMove);
-      if (stirSoundTimer.current) clearInterval(stirSoundTimer.current);
+      unsubStir();
+      unsubUp();
+      inputManager.disableCircularTracking();
+      if (stirSoundTimer.current) { clearInterval(stirSoundTimer.current); stirSoundTimer.current = null; }
     };
   }, [phase, getPotCenter, onScore]);
 
-  // Bonus score for perfect stirring speed
+  // Bonus score for sustained stirring
   useEffect(() => {
     if (phase !== 'stir') return;
-    const pts = 5;
     const t = setInterval(() => {
       if (!pausedRef.current && stirring && progressRef.current < 1) {
-        onScore(pts);
+        onScore(5);
         comboRef.current = Math.min(comboRef.current + 1, 4);
         onCombo(comboRef.current);
       }
@@ -164,7 +153,6 @@ export const StirTheSoup: React.FC<MinigameComponentProps> = ({
   }, [phase, stirring, onScore, onCombo]);
 
   const soupColor = `hsl(${20 + stirProgress * 20}, 80%, ${45 + stirProgress * 10}%)`;
-
   const INGREDIENTS = ['🥕', '🥦', '🧅', '🍄'];
 
   return (
@@ -230,7 +218,7 @@ export const StirTheSoup: React.FC<MinigameComponentProps> = ({
           overflow: 'hidden',
           border: '4px solid #333',
         }}>
-          {/* Soup */}
+          {/* Soup level */}
           <div style={{
             position: 'absolute', bottom: 0, left: 0, right: 0,
             height: `${40 + stirProgress * 45}%`,
@@ -238,7 +226,6 @@ export const StirTheSoup: React.FC<MinigameComponentProps> = ({
             transition: 'height 0.5s ease, background 0.3s ease',
             borderRadius: '0 0 36% 36%',
           }}>
-            {/* Bubbles */}
             {bubbles.map(b => (
               <div key={b.id} style={{
                 position: 'absolute',
@@ -253,7 +240,7 @@ export const StirTheSoup: React.FC<MinigameComponentProps> = ({
             ))}
           </div>
 
-          {/* Floating ingredient emojis in soup */}
+          {/* Floating ingredients */}
           {addedItems.map((_, i) => (
             <div key={i} style={{
               position: 'absolute',
@@ -281,12 +268,12 @@ export const StirTheSoup: React.FC<MinigameComponentProps> = ({
           }} />
         ))}
 
-        {/* Stir indicator ring */}
+        {/* Stir indicator ring — always spinning, emoji fades once stirring starts */}
         {phase === 'stir' && (
           <div style={{
             position: 'absolute', inset: -8,
             borderRadius: '50%',
-            border: `3px dashed rgba(255,107,53,0.6)`,
+            border: '3px dashed rgba(255,107,53,0.6)',
             animation: 'rotateSlow 1.5s linear infinite',
             pointerEvents: 'none',
           }}>
@@ -352,11 +339,3 @@ export const StirTheSoup: React.FC<MinigameComponentProps> = ({
     </div>
   );
 };
-
-function getClientPos(e: MouseEvent | TouchEvent): { x: number; y: number } {
-  if ('touches' in e) {
-    const t = e.touches[0] ?? e.changedTouches[0];
-    return { x: t.clientX, y: t.clientY };
-  }
-  return { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY };
-}
