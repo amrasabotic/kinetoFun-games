@@ -1,6 +1,6 @@
 /**
  * MediaPipe Hands TypeScript declarations.
- * Declare the global Hands and Camera classes loaded via CDN.
+ * Globals loaded via CDN in index.html (synchronous, pinned versions).
  */
 
 declare interface NormalizedLandmark {
@@ -20,8 +20,16 @@ declare interface HandsOptions {
   locateFile?: (file: string) => string;
 }
 
+declare interface HandsSetOptions {
+  maxNumHands?: number;
+  modelComplexity?: number;
+  minDetectionConfidence?: number;
+  minTrackingConfidence?: number;
+}
+
 declare class Hands {
   constructor(config?: HandsOptions);
+  setOptions(options: HandsSetOptions): void;
   initialize(): Promise<void>;
   send(input: { image: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement }): Promise<void>;
   onResults(callback: (results: HandsResults) => void): void;
@@ -29,7 +37,10 @@ declare class Hands {
 }
 
 declare interface CameraConfig {
-  onFrame: (frame: HTMLCanvasElement) => Promise<void>;
+  // MediaPipe Camera does NOT pass a canvas to onFrame — send the video element directly.
+  onFrame: () => Promise<void>;
+  width?: number;
+  height?: number;
 }
 
 declare class Camera {

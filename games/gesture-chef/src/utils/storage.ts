@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   soundEnabled: true,
   musicEnabled: false,
   difficulty: 'medium',
-  cameraEnabled: false,
+  cameraEnabled: true,
 };
 
 function safeGet<T>(key: string, fallback: T): T {
