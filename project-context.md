@@ -342,6 +342,7 @@ if(gs==='countdown'){
 | Dance Freeze | `games/dance-freeze/index.html` | MediaPipe Hands (4 players, motion detection) | ✅ Done |
 | Goalkeeper Hero | `games/goalkeeper-hero/index.html` | MediaPipe Hands (2 gloves, position) | ✅ Done |
 | Gesture Chef | `games/gesture-chef/` | React + Camera (non-standard, older style) | ⚠️ Different architecture |
+| Gesture Math Adventure | `games/gesture-math-adventure/index.html` | MediaPipe Hands + Pose (point/dwell + jump/crouch) | ✅ Done |
 
 ---
 
