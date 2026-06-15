@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>KinetoFun Games</title>
+<style>
+  body { font-family: sans-serif; background: #0d1117; color: #e6edf3; margin: 0; padding: 32px; }
+  h1 { font-size: 28px; margin-bottom: 4px; }
+  p.sub { color: #8b949e; margin-bottom: 12px; font-size: 14px; }
+  .tip { background: #161b22; border: 1px solid #30363d; border-left: 3px solid #58a6ff; border-radius: 8px;
+    padding: 12px 16px; margin-bottom: 28px; font-size: 13px; color: #8b949e; }
+  .tip code { background: #21262d; padding: 2px 7px; border-radius: 4px; color: #f0883e; font-size: 12px; }
+  .list { display: flex; flex-direction: column; gap: 10px; max-width: 720px; }
+  a.card { display: flex; align-items: center; gap: 16px; background: #161b22;
+    border: 1px solid #30363d; border-radius: 10px; padding: 14px 18px;
+    text-decoration: none; color: inherit; transition: border-color .15s, background .15s; }
+  a.card:hover { border-color: #58a6ff; background: #1c2230; }
+  .emoji { font-size: 26px; width: 34px; text-align: center; flex-shrink: 0; }
+  .info { flex: 1; }
+  .name { font-size: 16px; font-weight: 600; margin-bottom: 2px; }
+  .desc { font-size: 12px; color: #8b949e; }
+  .badges { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
+  .badge { font-size: 10px; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
+  .green { background:#1a3a1a; color:#3fb950; border:1px solid #3fb950; }
+  .blue  { background:#0d2137; color:#58a6ff; border:1px solid #58a6ff; }
+  .play  { font-size: 13px; font-weight: 600; color: #58a6ff; white-space: nowrap; }
+  hr { border:none; border-top:1px solid #21262d; margin:22px 0; }
+  h2 { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+
+<h1>🎮 KinetoFun Games</h1>
+<p class="sub">Gesture-controlled TV games — click any card to open.</p>
+
+<div class="tip">
+  💡 <strong>Deployed on Netlify?</strong> All games work as-is.<br>
+  <strong>Running locally?</strong> Open <code>index.html</code> directly for single-file games,
+  or run <code>npm run serve</code> first for the built games.
+</div>
+
+<h2>No build needed — single file games</h2>
+<div class="list">
+
+  <a class="card" href="games/dance-freeze/index.html" target="_blank">
+    <span class="emoji">💃</span>
+    <div class="info">
+      <div class="name">Dance Freeze</div>
+      <div class="desc">2–4 players • dance during music, freeze when it stops</div>
+    </div>
+    <div class="badges">
+      <span class="badge green">Ready</span>
+      <span class="badge blue">Hands</span>
+    </div>
+    <span class="play">Open ↗</span>
+  </a>
+
+  <a class="card" href="games/goalkeeper-hero/index.html" target="_blank">
+    <span class="emoji">🧤</span>
+    <div class="info">
+      <div class="name">Goalkeeper Hero</div>
+      <div class="desc">Block footballs with both hands • 15 levels</div>
+    </div>
+    <div class="badges">
+      <span class="badge green">Ready</span>
+      <span class="badge blue">Hands</span>
+    </div>
+    <span class="play">Open ↗</span>
+  </a>
+
+  <a class="card" href="games/gesture-math-adventure/index.html" target="_blank">
+    <span class="emoji">🧮</span>
+    <div class="info">
+      <div class="name">Gesture Math Adventure</div>
+      <div class="desc">Point to answer math questions • jump/crouch to confirm/skip</div>
+    </div>
+    <div class="badges">
+      <span class="badge green">Ready</span>
+      <span class="badge blue">Hands + Pose</span>
+    </div>
+    <span class="play">Open ↗</span>
+  </a>
+
+</div>
+
+<hr>
+
+<h2>Built games — work after deploy</h2>
+<div class="list">
+
+  <a class="card" href="games/balloon-pop-adventure/dist/index.html" target="_blank">
+    <span class="emoji">🎈</span>
+    <div class="info">
+      <div class="name">Balloon Pop Adventure</div>
+      <div class="desc">Pop balloons with your fingers • Classic / Endless / Party modes</div>
+    </div>
+    <div class="badges">
+      <span class="badge green">Built</span>
+      <span class="badge blue">Hands</span>
+    </div>
+    <span class="play">Open ↗</span>
+  </a>
+
+  <a class="card" href="games/gesture-chef/dist/index.html" target="_blank">
+    <span class="emoji">👨‍🍳</span>
+    <div class="info">
+      <div class="name">Gesture Chef</div>
+      <div class="desc">Chop, stir, flip and decorate • 4 cooking mini-games</div>
+    </div>
+    <div class="badges">
+      <span class="badge green">Built</span>
+      <span class="badge blue">Hands</span>
+    </div>
+    <span class="play">Open ↗</span>
+  </a>
+
+  <a class="card" href="games/gesture-runner/out/home/" target="_blank">
+    <span class="emoji">🏃</span>
+    <div class="info">
+      <div class="name">Gesture Runner</div>
+      <div class="desc">Endless runner • jump / slide / lean with your body</div>
+    </div>
+    <div class="badges">
+      <span class="badge green">Built</span>
+      <span class="badge blue">Pose + Hands</span>
+    </div>
+    <span class="play">Open ↗</span>
+  </a>
+
+</div>
+
+</body>
+</html>

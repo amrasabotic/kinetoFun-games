@@ -12,8 +12,12 @@
       href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap"
       rel="stylesheet"
     />
-    <script type="module" crossorigin src="/assets/index-CI6lSV6r.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-CMSCgTEM.css">
+    <!-- MediaPipe Hands — pinned versions, no async so globals exist before React mounts -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+    <script type="module" crossorigin src="./assets/index-MkZ0_gvr.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CMSCgTEM.css">
   </head>
   <body>
     <div id="root"></div>

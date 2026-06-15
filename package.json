@@ -1,0 +1,13 @@
+{
+  "name": "kinetofun-games",
+  "version": "1.0.0",
+  "scripts": {
+    "serve": "npx serve . -l 8080",
+    "build:balloon": "npm --prefix games/balloon-pop-adventure run build",
+    "build:chef": "npm --prefix games/gesture-chef run build",
+    "build:runner": "npm --prefix games/gesture-runner run build",
+    "build:all": "npm run build:balloon && npm run build:chef && npm run build:runner",
+    "install:all": "npm --prefix games/balloon-pop-adventure ci && npm --prefix games/gesture-chef ci && npm --prefix games/gesture-runner ci",
+    "build:netlify": "npm run install:all && npm run build:all"
+  }
+}
