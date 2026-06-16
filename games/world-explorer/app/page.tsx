@@ -32,6 +32,7 @@ const GESTURE_LABELS: Record<string, string> = {
 
 export default function WorldExplorer() {
   const { screen, showModeSelect, mode } = useGameStore();
+  const [isHydrated, setIsHydrated] = useState(false);
   const [gestureState, setGestureState] = useState<FullGestureState>({
     gesture: 'NONE',
     cursorX: 0.5,
@@ -43,6 +44,10 @@ export default function WorldExplorer() {
   });
   const waveHandledRef = useRef(false);
   const tickIntervalRef = useRef<ReturnType<typeof setInterval>>();
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const handleGesture = useCallback((state: FullGestureState) => {
     setGestureState(state);
@@ -137,11 +142,15 @@ export default function WorldExplorer() {
       {/* Camera feed — always visible in corner */}
       <div className="fixed bottom-4 right-4 z-50">
         <Camera onGestureUpdate={handleGesture} showLandmarks />
-        {gestureState.handPresent && (
-          <div className="text-center mt-1 text-xs text-white/50 font-mono">{gestureLabel}</div>
-        )}
-        {!gestureState.handPresent && (
-          <div className="text-center mt-1 text-xs text-white/30 font-mono">No hand detected</div>
+        {isHydrated && (
+          <>
+            {gestureState.handPresent && (
+              <div className="text-center mt-1 text-xs text-white/50 font-mono">{gestureLabel}</div>
+            )}
+            {!gestureState.handPresent && (
+              <div className="text-center mt-1 text-xs text-white/30 font-mono">No hand detected</div>
+            )}
+          </>
         )}
       </div>
 

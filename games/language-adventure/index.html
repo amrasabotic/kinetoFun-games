@@ -1,0 +1,1207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🌍 Language Adventure</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <style>
+    /* ── Reset & Base ─────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:           #06061a;
+      --surface:      rgba(255,255,255,0.06);
+      --surface-h:    rgba(255,255,255,0.13);
+      --border:       rgba(255,255,255,0.10);
+      --border-h:     rgba(255,255,255,0.28);
+      --text:         #ffffff;
+      --text-dim:     rgba(255,255,255,0.55);
+      --primary:      #7C3AED;
+      --primary-g:    #9F67FF;
+      --accent:       #06B6D4;
+      --accent-g:     #22D3EE;
+      --success:      #10B981;
+      --danger:       #EF4444;
+      --gold:         #FFD700;
+      --cat-color:    #7C3AED;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+    }
+
+    /* ── Animated Background ──────────────────────── */
+    #bg {
+      position: fixed; inset: 0; z-index: 0;
+      background:
+        radial-gradient(ellipse 70% 60% at 15% 55%, rgba(124,58,237,0.18) 0%, transparent 70%),
+        radial-gradient(ellipse 60% 50% at 85% 20%, rgba(6,182,212,0.13) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 55% 85%, rgba(16,185,129,0.09) 0%, transparent 60%),
+        linear-gradient(160deg, #06061a 0%, #0c0c2a 50%, #06061a 100%);
+    }
+
+    /* floating blobs */
+    .blob {
+      position: fixed; border-radius: 50%;
+      filter: blur(90px); opacity: 0.12;
+      pointer-events: none; z-index: 0;
+      animation: blob-drift ease-in-out infinite alternate;
+    }
+    .blob-1 { width:500px;height:500px; background:var(--primary); top:-100px; left:-100px; animation-duration:18s; }
+    .blob-2 { width:400px;height:400px; background:var(--accent);  bottom:-80px; right:-80px; animation-duration:14s; }
+    .blob-3 { width:300px;height:300px; background:#10B981; top:40%; left:60%; animation-duration:22s; }
+
+    @keyframes blob-drift {
+      from { transform: translate(0,0) scale(1); }
+      to   { transform: translate(40px,30px) scale(1.15); }
+    }
+
+    /* ── Camera Preview ───────────────────────────── */
+    #video {
+      position: fixed; bottom: 16px; right: 16px;
+      width: 200px; height: 150px;
+      border-radius: 14px;
+      border: 2px solid rgba(255,255,255,0.18);
+      object-fit: cover;
+      transform: scaleX(-1);
+      z-index: 10; opacity: 0.75;
+    }
+    #hand-canvas {
+      position: fixed; bottom: 16px; right: 16px;
+      width: 200px; height: 150px;
+      border-radius: 14px;
+      transform: scaleX(-1);
+      z-index: 11; pointer-events: none;
+    }
+
+    /* ── Gesture Cursor ───────────────────────────── */
+    #cursor {
+      position: fixed; z-index: 9999;
+      width: 44px; height: 44px;
+      transform: translate(-50%,-50%);
+      pointer-events: none;
+      display: none;
+    }
+    .c-dwell {
+      position: absolute; inset: -6px;
+      border-radius: 50%;
+      background: conic-gradient(var(--accent-g) var(--dp,0%), transparent var(--dp,0%));
+      transition: opacity .2s;
+      opacity: 0;
+    }
+    .c-ring {
+      position: absolute; inset: 0;
+      border-radius: 50%;
+      border: 3px solid rgba(255,255,255,0.65);
+      box-shadow: 0 0 14px rgba(255,255,255,0.35);
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .c-dot {
+      position: absolute; inset: 14px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 0 8px #fff;
+      transition: background .15s, box-shadow .15s;
+    }
+    #cursor.dwelling   .c-dwell { opacity: 1; }
+    #cursor.pinching   .c-dot   { background: var(--primary-g); box-shadow: 0 0 18px var(--primary-g); }
+    #cursor.pinching   .c-ring  { border-color: var(--primary-g); box-shadow: 0 0 18px var(--primary-g); }
+    #cursor.open-palm  .c-ring  { border-color: var(--success); box-shadow: 0 0 18px var(--success); }
+    #cursor.fist       .c-ring  { border-color: var(--danger); box-shadow: 0 0 18px var(--danger); }
+    #cursor.peace      .c-ring  { border-color: var(--gold); box-shadow: 0 0 18px var(--gold); }
+
+    /* ── HUD Chips ────────────────────────────────── */
+    #hand-status {
+      position: fixed; top: 16px; right: 16px;
+      padding: 8px 18px; border-radius: 20px;
+      font-size: 14px; font-weight: 600;
+      z-index: 100; transition: all .3s;
+    }
+    #hand-status.detected     { background:rgba(16,185,129,.18); border:1px solid rgba(16,185,129,.5); color:#34D399; }
+    #hand-status.not-detected { background:rgba(239,68,68,.18);  border:1px solid rgba(239,68,68,.5);  color:#FC8181; }
+
+    #gesture-chip {
+      position: fixed; bottom: 178px; right: 16px;
+      padding: 8px 14px;
+      background: rgba(0,0,0,.55);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      font-size: 12px; color: var(--text-dim);
+      z-index: 100; text-align: center; min-width: 110px;
+    }
+    #gesture-chip .g-icon { font-size: 22px; display: block; margin-bottom: 3px; }
+
+    /* ── Controls Reference ───────────────────────── */
+    #ctrl-guide {
+      position: fixed; bottom: 286px; right: 16px;
+      padding: 14px 16px;
+      background: rgba(0,0,0,.65);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      font-size: 12px; color: var(--text-dim);
+      z-index: 100; line-height: 1;
+    }
+    #ctrl-guide h4 { color: #fff; margin-bottom: 9px; font-size: 13px; }
+    .ctrl-row { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+    .ctrl-row:last-child { margin-bottom:0; }
+    .ctrl-icon { font-size:18px; width:24px; text-align:center; }
+
+    /* ── Screens ──────────────────────────────────── */
+    .screen {
+      position: fixed; inset: 0; z-index: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none;
+      transition: opacity .4s ease, transform .4s ease;
+      transform: translateY(12px);
+    }
+    .screen.active {
+      opacity: 1; pointer-events: auto;
+      transform: translateY(0);
+    }
+
+    /* ── Buttons (generic) ────────────────────────── */
+    .btn {
+      position: relative; overflow: hidden;
+      padding: 20px 52px;
+      border: none; border-radius: 22px;
+      font-size: 28px; font-weight: 700;
+      cursor: pointer; transition: transform .18s, box-shadow .18s;
+    }
+    .btn::after {
+      content:''; position:absolute; inset:0;
+      background: rgba(255,255,255,0);
+      transition: background .18s;
+      border-radius: inherit;
+    }
+    .btn.hovered::after { background: rgba(255,255,255,0.10); }
+    .btn.hovered { transform: scale(1.06) translateY(-2px); }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: #fff;
+      box-shadow: 0 8px 30px rgba(124,58,237,0.45);
+    }
+    .btn-primary.hovered { box-shadow: 0 14px 40px rgba(124,58,237,0.65); }
+
+    .btn-secondary {
+      background: var(--surface);
+      border: 2px solid var(--border);
+      color: var(--text);
+    }
+    .btn-secondary.hovered { background: var(--surface-h); border-color: var(--border-h); }
+
+    /* ── LOADING SCREEN ───────────────────────────── */
+    #screen-loading { gap: 22px; }
+    .load-globe { font-size: 86px; animation: float 3s ease-in-out infinite; }
+    .load-title  { font-size: 46px; font-weight: 900; }
+    .load-sub    { font-size: 18px; color: var(--text-dim); }
+    .spinner {
+      width: 52px; height: 52px;
+      border: 4px solid rgba(255,255,255,0.1);
+      border-top-color: var(--primary-g);
+      border-radius: 50%;
+      animation: spin .75s linear infinite;
+    }
+    #load-error { color: #FC8181; font-size: 18px; display: none; }
+
+    /* ── MENU SCREEN ──────────────────────────────── */
+    #screen-menu { gap: 36px; }
+    .menu-globe { font-size: 90px; animation: float 3s ease-in-out infinite; }
+    .menu-title {
+      font-size: 78px; font-weight: 900; text-align: center; line-height: 1.05;
+      background: linear-gradient(135deg, #fff 0%, var(--primary-g) 45%, var(--accent-g) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .menu-sub { font-size: 22px; color: var(--text-dim); text-align: center; }
+    .menu-stats { display: flex; gap: 32px; }
+    .stat-box {
+      text-align: center; padding: 18px 28px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
+    }
+    .stat-val  { font-size: 38px; font-weight: 800; color: var(--gold); }
+    .stat-lbl  { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+    /* ── CATEGORY SCREEN ──────────────────────────── */
+    #screen-category { gap: 36px; }
+    .screen-title { font-size: 50px; font-weight: 800; }
+    .cat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 22px; }
+    .cat-card {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 12px; padding: 30px 44px;
+      background: var(--surface);
+      border: 2px solid var(--border);
+      border-radius: 26px;
+      cursor: pointer; transition: transform .18s, box-shadow .18s, background .18s, border-color .18s;
+      min-width: 190px;
+    }
+    .cat-card.hovered {
+      background: var(--surface-h); border-color: var(--border-h);
+      transform: scale(1.06) translateY(-4px);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+    }
+    .cat-emoji { font-size: 54px; }
+    .cat-name  { font-size: 21px; font-weight: 700; }
+
+    /* ── GAME SCREEN ──────────────────────────────── */
+    #screen-game { justify-content: flex-start; padding: 0; gap: 0; }
+
+    .game-hud {
+      width: 100%; display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 18px 56px;
+      background: rgba(0,0,0,0.35);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .hud-score  { font-size: 28px; font-weight: 700; }
+    .hud-score span { color: var(--gold); }
+    .hud-streak { display: flex; align-items: center; gap: 10px; font-size: 26px; font-weight: 700; }
+    .hud-q      { font-size: 22px; color: var(--text-dim); }
+
+    .mult-badge {
+      padding: 4px 16px; border-radius: 20px;
+      font-size: 18px; font-weight: 800;
+      border: 2px solid; display: none;
+    }
+    .mult-badge.x2 {
+      background: rgba(16,185,129,.2); border-color: var(--success); color: var(--success);
+      display: inline-block;
+      animation: glow-pulse 1s ease-in-out infinite;
+    }
+    .mult-badge.x3 {
+      background: rgba(255,215,0,.2); border-color: var(--gold); color: var(--gold);
+      display: inline-block;
+      animation: glow-pulse .6s ease-in-out infinite;
+    }
+
+    @keyframes glow-pulse {
+      0%,100% { box-shadow: 0 0 8px currentColor; }
+      50%      { box-shadow: 0 0 22px currentColor; }
+    }
+
+    .prog-wrap { width:100%; padding: 0 56px; flex-shrink: 0; }
+    .prog-bar  { height: 6px; background: rgba(255,255,255,.08); border-radius: 3px; }
+    .prog-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+      border-radius: 3px;
+      transition: width .5s ease;
+    }
+
+    .prompt-area {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 14px; padding: 24px 32px 12px;
+    }
+    .prompt-label { font-size: 18px; color: var(--text-dim); letter-spacing: 3px; text-transform: uppercase; }
+    .prompt-emoji { font-size: 118px; line-height: 1; animation: float 3s ease-in-out infinite; filter: drop-shadow(0 0 24px rgba(255,255,255,.25)); }
+    .prompt-ctx   { font-size: 30px; font-weight: 700; color: rgba(255,255,255,.85); text-align: center; }
+
+    .answers-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 18px; padding: 16px 70px 28px;
+      width: 100%; flex-shrink: 0;
+    }
+
+    .ans-btn {
+      padding: 26px 20px;
+      background: var(--surface);
+      border: 3px solid var(--border);
+      border-radius: 22px;
+      font-size: 30px; font-weight: 700; color: #fff;
+      text-align: center; cursor: pointer;
+      transition: transform .18s, background .18s, border-color .18s, box-shadow .18s;
+      position: relative; overflow: hidden;
+    }
+    .ans-btn::after {
+      content:''; position:absolute; inset:0;
+      background: rgba(255,255,255,0); transition: background .18s;
+    }
+    .ans-btn.hovered {
+      background: var(--surface-h); border-color: var(--accent);
+      transform: scale(1.03);
+      box-shadow: 0 8px 24px rgba(6,182,212,0.3);
+    }
+    .ans-btn.hovered::after { background: rgba(255,255,255,0.06); }
+
+    .ans-btn.state-correct {
+      background: rgba(16,185,129,.28); border-color: var(--success);
+      box-shadow: 0 0 30px rgba(16,185,129,.5);
+      animation: ans-correct .5s ease;
+    }
+    .ans-btn.state-wrong {
+      background: rgba(239,68,68,.28); border-color: var(--danger);
+      box-shadow: 0 0 30px rgba(239,68,68,.5);
+      animation: shake .5s ease;
+    }
+    .ans-btn.state-reveal {
+      background: rgba(16,185,129,.14); border-color: rgba(16,185,129,.6);
+    }
+    .ans-btn.state-dim { opacity: 0.35; }
+
+    @keyframes ans-correct {
+      0%   { transform: scale(1); }
+      50%  { transform: scale(1.07); }
+      100% { transform: scale(1); }
+    }
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      20%      { transform: translateX(-9px); }
+      40%      { transform: translateX(9px); }
+      60%      { transform: translateX(-6px); }
+      80%      { transform: translateX(6px); }
+    }
+
+    /* ── FEEDBACK OVERLAY ─────────────────────────── */
+    #feedback-overlay {
+      position: fixed; inset: 0; z-index: 500;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      pointer-events: none;
+      opacity: 0; transition: opacity .2s;
+    }
+    #feedback-overlay.show { opacity: 1; }
+    .fb-msg {
+      font-size: 76px; font-weight: 900;
+      text-shadow: 0 0 40px currentColor;
+      animation: fb-pop .4s cubic-bezier(.34,1.56,.64,1);
+    }
+    .fb-msg.correct { color: var(--success); }
+    .fb-msg.wrong   { color: var(--danger); }
+    .fb-streak-msg  { font-size: 32px; font-weight: 800; color: var(--gold); margin-top: 10px; animation: fb-pop .4s .1s cubic-bezier(.34,1.56,.64,1) both; }
+
+    @keyframes fb-pop {
+      from { transform: scale(0.4); opacity: 0; }
+      to   { transform: scale(1);   opacity: 1; }
+    }
+
+    /* ── POINTS POPUP ─────────────────────────────── */
+    .pts-popup {
+      position: fixed; font-size: 38px; font-weight: 900;
+      color: var(--gold); pointer-events: none; z-index: 600;
+      text-shadow: 0 0 20px var(--gold);
+      animation: pts-float 1.1s ease forwards;
+    }
+    @keyframes pts-float {
+      0%   { transform: translateY(0)    scale(1);    opacity: 1; }
+      100% { transform: translateY(-90px) scale(1.2);  opacity: 0; }
+    }
+
+    /* ── RESULT SCREEN ────────────────────────────── */
+    #screen-result { gap: 30px; }
+    .result-title  { font-size: 70px; font-weight: 900; text-align: center; }
+    .result-score  { font-size: 104px; font-weight: 900; color: var(--gold); line-height:1; text-shadow: 0 0 40px rgba(255,215,0,.5); }
+    .result-stats  { display: flex; gap: 36px; }
+    .result-row    { display: flex; gap: 20px; margin-top: 10px; }
+
+    /* ── CONFETTI ─────────────────────────────────── */
+    .confetti {
+      position: fixed; pointer-events: none; z-index: 700;
+      top: -14px;
+      animation: conf-fall linear forwards;
+    }
+    @keyframes conf-fall {
+      0%   { transform: translateY(0) rotate(0deg);    opacity: 1; }
+      100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+    }
+
+    /* ── Shared Animations ────────────────────────── */
+    @keyframes float {
+      0%,100% { transform: translateY(0);   }
+      50%      { transform: translateY(-13px); }
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- Background -->
+<div id="bg"></div>
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+<div class="blob blob-3"></div>
+
+<!-- Camera & hand canvas -->
+<video id="video" autoplay playsinline muted></video>
+<canvas id="hand-canvas"></canvas>
+
+<!-- Gesture cursor -->
+<div id="cursor">
+  <div class="c-dwell"></div>
+  <div class="c-ring"></div>
+  <div class="c-dot"></div>
+</div>
+
+<!-- Status chips -->
+<div id="hand-status" class="not-detected">✋ Waiting for hand…</div>
+<div id="gesture-chip">
+  <span class="g-icon" id="g-icon">🤚</span>
+  <span id="g-text">No Gesture</span>
+</div>
+
+<!-- Controls reference -->
+<div id="ctrl-guide">
+  <h4>Controls</h4>
+  <div class="ctrl-row"><span class="ctrl-icon">👆</span>Point &amp; hold to select</div>
+  <div class="ctrl-row"><span class="ctrl-icon">👌</span>Pinch = instant select</div>
+  <div class="ctrl-row"><span class="ctrl-icon">✊</span>Fist = go back</div>
+  <div class="ctrl-row"><span class="ctrl-icon">✌️</span>Peace = next / skip</div>
+</div>
+
+<!-- Feedback overlay -->
+<div id="feedback-overlay">
+  <div class="fb-msg" id="fb-msg"></div>
+  <div class="fb-streak-msg" id="fb-streak-msg"></div>
+</div>
+
+<!-- ════ SCREEN: LOADING ════ -->
+<div id="screen-loading" class="screen active">
+  <div class="load-globe">🌍</div>
+  <div class="load-title">Language Adventure</div>
+  <div class="spinner"></div>
+  <div class="load-sub">Loading camera &amp; hand tracking…</div>
+  <div id="load-error">❌ Camera access denied — please allow camera and reload.</div>
+</div>
+
+<!-- ════ SCREEN: MENU ════ -->
+<div id="screen-menu" class="screen">
+  <div class="menu-globe">🌍</div>
+  <div class="menu-title">Language<br>Adventure</div>
+  <div class="menu-sub">Learn words through movement!</div>
+  <div class="menu-stats">
+    <div class="stat-box">
+      <div class="stat-val" id="stat-best-score">0</div>
+      <div class="stat-lbl">Best Score</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="stat-best-streak">0</div>
+      <div class="stat-lbl">Best Streak</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="stat-last-cat">—</div>
+      <div class="stat-lbl">Last Category</div>
+    </div>
+  </div>
+  <button class="btn btn-primary" data-action="goto-category">▶ Start Game</button>
+</div>
+
+<!-- ════ SCREEN: CATEGORY ════ -->
+<div id="screen-category" class="screen">
+  <div class="screen-title">Choose Your Category</div>
+  <div class="cat-grid" id="cat-grid"></div>
+  <button class="btn btn-secondary" data-action="goto-menu">← Back</button>
+</div>
+
+<!-- ════ SCREEN: GAME ════ -->
+<div id="screen-game" class="screen">
+  <div class="game-hud">
+    <div class="hud-score">Score: <span id="hud-score">0</span></div>
+    <div class="hud-streak">
+      🔥 <span id="hud-streak">0</span>
+      <span class="mult-badge" id="mult-badge"></span>
+    </div>
+    <div class="hud-q">Q <span id="hud-q">1</span> / 10</div>
+  </div>
+  <div class="prog-wrap">
+    <div class="prog-bar"><div class="prog-fill" id="prog-fill" style="width:0%"></div></div>
+  </div>
+  <div class="prompt-area">
+    <div class="prompt-label">What is this?</div>
+    <div class="prompt-emoji" id="prompt-emoji"></div>
+    <div class="prompt-ctx"  id="prompt-ctx"></div>
+  </div>
+  <div class="answers-grid" id="answers-grid"></div>
+</div>
+
+<!-- ════ SCREEN: RESULT ════ -->
+<div id="screen-result" class="screen">
+  <div class="result-title" id="result-title">🎉 Well Done!</div>
+  <div class="result-score" id="result-score">0</div>
+  <div class="result-stats">
+    <div class="stat-box">
+      <div class="stat-val" id="res-correct">0/10</div>
+      <div class="stat-lbl">Correct</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="res-streak">0</div>
+      <div class="stat-lbl">Best Streak</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="res-acc">0%</div>
+      <div class="stat-lbl">Accuracy</div>
+    </div>
+  </div>
+  <div class="result-row">
+    <button class="btn btn-primary"   data-action="play-again">🔄 Play Again</button>
+    <button class="btn btn-secondary" data-action="goto-category">📁 Categories</button>
+    <button class="btn btn-secondary" data-action="goto-menu">🏠 Menu</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ -->
+<script>
+/* ══════════════════════════════════════════════════════════
+   GAME DATA
+══════════════════════════════════════════════════════════ */
+const CATEGORIES = [
+  {
+    id: 'animals', name: 'Animals', emoji: '🐶', color: '#FF6B6B',
+    questions: [
+      { emoji:'🐶', ctx:'', correct:'Dog',       wrong:['Cat','Car','Apple'] },
+      { emoji:'🐱', ctx:'', correct:'Cat',       wrong:['Dog','Bird','Fish'] },
+      { emoji:'🐦', ctx:'', correct:'Bird',      wrong:['Fish','Lion','Frog'] },
+      { emoji:'🐟', ctx:'', correct:'Fish',      wrong:['Dog','Bear','Snake'] },
+      { emoji:'🦁', ctx:'', correct:'Lion',      wrong:['Tiger','Bear','Wolf'] },
+      { emoji:'🐘', ctx:'', correct:'Elephant',  wrong:['Rhino','Hippo','Giraffe'] },
+      { emoji:'🐰', ctx:'', correct:'Rabbit',    wrong:['Mouse','Squirrel','Hamster'] },
+      { emoji:'🐸', ctx:'', correct:'Frog',      wrong:['Snake','Lizard','Turtle'] },
+      { emoji:'🦋', ctx:'', correct:'Butterfly', wrong:['Bee','Ant','Moth'] },
+      { emoji:'🐺', ctx:'', correct:'Wolf',      wrong:['Fox','Dog','Bear'] },
+    ]
+  },
+  {
+    id: 'colors', name: 'Colors', emoji: '🎨', color: '#60A5FA',
+    questions: [
+      { emoji:'🔴', ctx:'', correct:'Red',    wrong:['Blue','Green','Yellow'] },
+      { emoji:'🔵', ctx:'', correct:'Blue',   wrong:['Green','Red','Purple'] },
+      { emoji:'🟢', ctx:'', correct:'Green',  wrong:['Yellow','Orange','Pink'] },
+      { emoji:'🟡', ctx:'', correct:'Yellow', wrong:['White','Gray','Blue'] },
+      { emoji:'🟣', ctx:'', correct:'Purple', wrong:['Pink','Red','Blue'] },
+      { emoji:'🟠', ctx:'', correct:'Orange', wrong:['Yellow','Red','Brown'] },
+      { emoji:'⚫', ctx:'', correct:'Black',  wrong:['White','Gray','Brown'] },
+      { emoji:'⚪', ctx:'', correct:'White',  wrong:['Black','Gray','Silver'] },
+      { emoji:'🩷', ctx:'', correct:'Pink',   wrong:['Red','Purple','White'] },
+      { emoji:'🟤', ctx:'', correct:'Brown',  wrong:['Orange','Red','Black'] },
+    ]
+  },
+  {
+    id: 'numbers', name: 'Numbers', emoji: '🔢', color: '#67E8F9',
+    questions: [
+      { emoji:'1️⃣',  ctx:'', correct:'One',    wrong:['Two','Three','Four'] },
+      { emoji:'2️⃣',  ctx:'', correct:'Two',    wrong:['One','Five','Seven'] },
+      { emoji:'3️⃣',  ctx:'', correct:'Three',  wrong:['Two','Four','Six'] },
+      { emoji:'4️⃣',  ctx:'', correct:'Four',   wrong:['Three','Five','Six'] },
+      { emoji:'5️⃣',  ctx:'', correct:'Five',   wrong:['Three','Six','Eight'] },
+      { emoji:'6️⃣',  ctx:'', correct:'Six',    wrong:['Four','Seven','Eight'] },
+      { emoji:'7️⃣',  ctx:'', correct:'Seven',  wrong:['Six','Nine','Four'] },
+      { emoji:'8️⃣',  ctx:'', correct:'Eight',  wrong:['Six','Nine','Seven'] },
+      { emoji:'9️⃣',  ctx:'', correct:'Nine',   wrong:['Seven','Ten','Eight'] },
+      { emoji:'🔟', ctx:'', correct:'Ten',    wrong:['Eight','Nine','Eleven'] },
+    ]
+  },
+  {
+    id: 'food', name: 'Food', emoji: '🍎', color: '#86EFAC',
+    questions: [
+      { emoji:'🍎', ctx:'', correct:'Apple',      wrong:['Banana','Orange','Mango'] },
+      { emoji:'🍕', ctx:'', correct:'Pizza',      wrong:['Burger','Sandwich','Pasta'] },
+      { emoji:'🍌', ctx:'', correct:'Banana',     wrong:['Mango','Lemon','Orange'] },
+      { emoji:'🍦', ctx:'', correct:'Ice Cream',  wrong:['Cake','Cookie','Donut'] },
+      { emoji:'🍔', ctx:'', correct:'Burger',     wrong:['Hot Dog','Sandwich','Pizza'] },
+      { emoji:'🎂', ctx:'', correct:'Cake',       wrong:['Pie','Cookie','Muffin'] },
+      { emoji:'🍓', ctx:'', correct:'Strawberry', wrong:['Cherry','Raspberry','Blueberry'] },
+      { emoji:'🍉', ctx:'', correct:'Watermelon', wrong:['Melon','Mango','Cucumber'] },
+      { emoji:'🍇', ctx:'', correct:'Grapes',     wrong:['Berries','Plum','Cherry'] },
+      { emoji:'🥑', ctx:'', correct:'Avocado',    wrong:['Pear','Kiwi','Lime'] },
+    ]
+  },
+  {
+    id: 'greetings', name: 'Greetings', emoji: '👋', color: '#FDE68A',
+    questions: [
+      { emoji:'👋', ctx:'Meeting someone',  correct:'Hello',        wrong:['Goodbye','Thank You','Sorry'] },
+      { emoji:'👋', ctx:'Leaving someone',  correct:'Goodbye',      wrong:['Hello','Please','Welcome'] },
+      { emoji:'🙏', ctx:'Someone helps you',correct:'Thank You',    wrong:['Sorry','Please','Welcome'] },
+      { emoji:'😔', ctx:'You made a mistake',correct:'Sorry',       wrong:['Thank You','Hello','Please'] },
+      { emoji:'🤝', ctx:'Guest arrives',    correct:'Welcome',      wrong:['Goodbye','Sorry','Hello'] },
+      { emoji:'🙏', ctx:'Asking a favour',  correct:'Please',       wrong:['Sorry','Thank You','Welcome'] },
+      { emoji:'✅', ctx:'You agree',        correct:'Yes',          wrong:['Maybe','No','Later'] },
+      { emoji:'❌', ctx:'You disagree',     correct:'No',           wrong:['Yes','Maybe','Later'] },
+      { emoji:'🌞', ctx:'Morning greeting', correct:'Good Morning', wrong:['Good Night','Good Afternoon','Goodbye'] },
+      { emoji:'🌙', ctx:'Night farewell',   correct:'Good Night',   wrong:['Good Morning','Hello','See You'] },
+    ]
+  },
+  {
+    id: 'gestures', name: 'Gestures', emoji: '🤝', color: '#F9A8D4',
+    questions: [
+      { emoji:'👍', ctx:'', correct:'Well Done',   wrong:['Stop!','No!','Okay'] },
+      { emoji:'✌️', ctx:'', correct:'Peace',       wrong:['Three','Victory','Number'] },
+      { emoji:'👏', ctx:'', correct:'Applause',    wrong:['Dance','Wave','Cheer'] },
+      { emoji:'🤝', ctx:'', correct:'Handshake',   wrong:['Wave','Point','Bow'] },
+      { emoji:'☝️', ctx:'', correct:'Number One',  wrong:['Up','Direction','Point'] },
+      { emoji:'✋', ctx:'', correct:'High Five',    wrong:['Stop','Wave','Reach'] },
+      { emoji:'👊', ctx:'', correct:'Fist Bump',   wrong:['Punch','Strong','Power'] },
+      { emoji:'👌', ctx:'', correct:'Okay',        wrong:['Perfect','Good','Fine'] },
+      { emoji:'🤞', ctx:'', correct:'Good Luck',   wrong:['Cross','Hope','Wish'] },
+      { emoji:'🤟', ctx:'', correct:'I Love You',  wrong:['Rock On','Call Me','Peace'] },
+    ]
+  },
+];
+
+/* ══════════════════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════════════════ */
+const S = {
+  screen:          'loading',
+  category:        null,
+  score:           0,
+  streak:          0,
+  bestStreak:      0,
+  qIndex:          0,
+  questions:       [],
+  answers:         [],
+  answering:       false,
+  handDetected:    false,
+  gesture:         'none',
+  gestureCooldown: false,
+  feedbackActive:  false,
+};
+
+/* ══════════════════════════════════════════════════════════
+   STORAGE
+══════════════════════════════════════════════════════════ */
+const LS = {
+  get bestScore()   { return +localStorage.getItem('la_best_score')  || 0; },
+  get bestStreak()  { return +localStorage.getItem('la_best_streak') || 0; },
+  get lastCat()     { return localStorage.getItem('la_last_cat')     || '—'; },
+  saveBestScore(v)  { if (v > this.bestScore)  localStorage.setItem('la_best_score',  v); },
+  saveBestStreak(v) { if (v > this.bestStreak) localStorage.setItem('la_best_streak', v); },
+  saveLastCat(id)   { localStorage.setItem('la_last_cat', id); },
+};
+
+/* ══════════════════════════════════════════════════════════
+   AUDIO  (Web Audio API — no external files)
+══════════════════════════════════════════════════════════ */
+let _actx = null;
+function actx() {
+  if (!_actx) _actx = new (window.AudioContext || window.webkitAudioContext)();
+  if (_actx.state === 'suspended') _actx.resume();
+  return _actx;
+}
+function tone(freq, dur, vol = 0.18, type = 'sine') {
+  try {
+    const c = actx(), osc = c.createOscillator(), g = c.createGain();
+    osc.type = type; osc.frequency.value = freq;
+    g.gain.setValueAtTime(vol, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+    osc.connect(g); g.connect(c.destination);
+    osc.start(); osc.stop(c.currentTime + dur);
+  } catch (_) {}
+}
+const SFX = {
+  hover()   { tone(330, 0.05, 0.06); },
+  select()  { tone(440, 0.09, 0.12); },
+  correct() { tone(523,.1); setTimeout(()=>tone(659,.1),110); setTimeout(()=>tone(784,.22),220); },
+  wrong()   { tone(180, 0.35, 0.15, 'sawtooth'); },
+  streak()  { tone(880,.12); setTimeout(()=>tone(1046,.18),130); },
+  back()    { tone(260, 0.12, 0.10, 'triangle'); },
+};
+
+/* ══════════════════════════════════════════════════════════
+   UTILITIES
+══════════════════════════════════════════════════════════ */
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+/* ══════════════════════════════════════════════════════════
+   SCREEN MANAGER
+══════════════════════════════════════════════════════════ */
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('screen-' + name);
+  if (el) el.classList.add('active');
+  S.screen = name;
+  resetDwell();
+}
+
+/* ══════════════════════════════════════════════════════════
+   MENU
+══════════════════════════════════════════════════════════ */
+function renderMenu() {
+  document.getElementById('stat-best-score').textContent  = LS.bestScore;
+  document.getElementById('stat-best-streak').textContent = LS.bestStreak;
+  const lc = LS.lastCat;
+  const cat = CATEGORIES.find(c => c.id === lc);
+  document.getElementById('stat-last-cat').textContent = cat ? cat.emoji + ' ' + cat.name : '—';
+  showScreen('menu');
+}
+
+/* ══════════════════════════════════════════════════════════
+   CATEGORY
+══════════════════════════════════════════════════════════ */
+function renderCategory() {
+  const grid = document.getElementById('cat-grid');
+  grid.innerHTML = CATEGORIES.map(c => `
+    <div class="cat-card" data-action="select-cat" data-cat="${c.id}">
+      <div class="cat-emoji">${c.emoji}</div>
+      <div class="cat-name">${c.name}</div>
+    </div>
+  `).join('');
+  showScreen('category');
+}
+
+/* ══════════════════════════════════════════════════════════
+   GAME LOGIC
+══════════════════════════════════════════════════════════ */
+function startGame(catId) {
+  const cat = CATEGORIES.find(c => c.id === catId);
+  if (!cat) return;
+  S.category  = cat;
+  S.score     = 0;
+  S.streak    = 0;
+  S.bestStreak = 0;
+  S.qIndex    = 0;
+  S.answers   = [];
+  S.answering = false;
+  S.feedbackActive = false;
+
+  S.questions = shuffle(cat.questions).slice(0, 10);
+  LS.saveLastCat(cat.id);
+
+  showScreen('game');
+  renderQuestion();
+}
+
+function renderQuestion() {
+  if (S.qIndex >= S.questions.length) { endGame(); return; }
+
+  const q = S.questions[S.qIndex];
+  S.answering = true;
+
+  /* HUD */
+  document.getElementById('hud-score').textContent  = S.score;
+  document.getElementById('hud-streak').textContent = S.streak;
+  document.getElementById('hud-q').textContent      = S.qIndex + 1;
+  document.getElementById('prog-fill').style.width  = (S.qIndex / S.questions.length * 100) + '%';
+
+  /* Streak multiplier badge */
+  const badge = document.getElementById('mult-badge');
+  if (S.streak >= 6) {
+    badge.textContent  = '×3';
+    badge.className    = 'mult-badge x3';
+  } else if (S.streak >= 3) {
+    badge.textContent  = '×2';
+    badge.className    = 'mult-badge x2';
+  } else {
+    badge.className    = 'mult-badge';
+  }
+
+  /* Prompt */
+  document.getElementById('prompt-emoji').textContent = q.emoji;
+  const ctxEl = document.getElementById('prompt-ctx');
+  ctxEl.textContent  = q.ctx || '';
+  ctxEl.style.display = q.ctx ? 'block' : 'none';
+
+  /* Shuffle options */
+  const opts = shuffle([q.correct, ...q.wrong]);
+  document.getElementById('answers-grid').innerHTML = opts.map(o => `
+    <button class="ans-btn" data-opt="${o}">${o}</button>
+  `).join('');
+}
+
+function handleAnswer(opt) {
+  if (!S.answering || S.feedbackActive) return;
+  S.answering = false;
+  S.feedbackActive = true;
+
+  const q = S.questions[S.qIndex];
+  const correct = opt === q.correct;
+
+  /* Visual state on buttons */
+  document.querySelectorAll('.ans-btn').forEach(btn => {
+    const o = btn.dataset.opt;
+    if (o === opt)     btn.classList.add(correct ? 'state-correct' : 'state-wrong');
+    if (!correct && o === q.correct) btn.classList.add('state-reveal');
+    if (o !== opt && o !== q.correct) btn.classList.add('state-dim');
+  });
+
+  if (correct) {
+    S.streak++;
+    if (S.streak > S.bestStreak) S.bestStreak = S.streak;
+    const mult = S.streak >= 6 ? 3 : S.streak >= 3 ? 2 : 1;
+    const pts  = 10 * mult;
+    S.score   += pts;
+    S.answers.push(true);
+    SFX.correct();
+    if (S.streak % 3 === 0) SFX.streak();
+    showFeedback('✓ Correct!', true, S.streak >= 3 ? `🔥 ${S.streak} Streak!` : '');
+    showPtsPopup('+' + pts + (mult > 1 ? ` (×${mult})` : ''));
+  } else {
+    S.streak = 0;
+    S.answers.push(false);
+    SFX.wrong();
+    showFeedback('✗ Wrong!', false, `Correct: ${q.correct}`);
+  }
+
+  document.getElementById('hud-score').textContent  = S.score;
+  document.getElementById('hud-streak').textContent = S.streak;
+
+  setTimeout(() => {
+    hideFeedback();
+    S.feedbackActive = false;
+    S.qIndex++;
+    renderQuestion();
+  }, 1900);
+}
+
+/* ══════════════════════════════════════════════════════════
+   END GAME
+══════════════════════════════════════════════════════════ */
+function endGame() {
+  LS.saveBestScore(S.score);
+  LS.saveBestStreak(S.bestStreak);
+
+  const correct  = S.answers.filter(Boolean).length;
+  const total    = S.answers.length;
+  const accuracy = total ? Math.round(correct / total * 100) : 0;
+
+  let title = '💪 Keep Practising!';
+  if (accuracy === 100) title = '🏆 Perfect Score!';
+  else if (accuracy >= 90) title = '⭐ Outstanding!';
+  else if (accuracy >= 70) title = '🎉 Great Job!';
+  else if (accuracy >= 50) title = '👍 Good Effort!';
+
+  document.getElementById('result-title').textContent = title;
+  document.getElementById('result-score').textContent = S.score;
+  document.getElementById('res-correct').textContent  = `${correct}/${total}`;
+  document.getElementById('res-streak').textContent   = S.bestStreak;
+  document.getElementById('res-acc').textContent      = accuracy + '%';
+
+  if (accuracy === 100) spawnConfetti();
+
+  showScreen('result');
+}
+
+/* ══════════════════════════════════════════════════════════
+   FEEDBACK
+══════════════════════════════════════════════════════════ */
+function showFeedback(msg, ok, sub = '') {
+  const ov   = document.getElementById('feedback-overlay');
+  const main = document.getElementById('fb-msg');
+  const sub_ = document.getElementById('fb-streak-msg');
+  main.textContent = msg;
+  main.className   = 'fb-msg ' + (ok ? 'correct' : 'wrong');
+  sub_.textContent = sub;
+  sub_.style.display = sub ? 'block' : 'none';
+  ov.classList.add('show');
+}
+function hideFeedback() {
+  document.getElementById('feedback-overlay').classList.remove('show');
+}
+
+function showPtsPopup(txt) {
+  const el = document.createElement('div');
+  el.className   = 'pts-popup';
+  el.textContent = txt;
+  el.style.left  = (window.innerWidth / 2 - 40) + 'px';
+  el.style.top   = (window.innerHeight / 2 - 80) + 'px';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1200);
+}
+
+/* ══════════════════════════════════════════════════════════
+   CONFETTI
+══════════════════════════════════════════════════════════ */
+function spawnConfetti() {
+  const cols = ['#FF6B6B','#FFD700','#67E8F9','#86EFAC','#F9A8D4','#C084FC','#FCA5A5'];
+  for (let i = 0; i < 90; i++) {
+    const el = document.createElement('div');
+    el.className = 'confetti';
+    const sz = 6 + Math.random() * 9;
+    el.style.cssText = `
+      width:${sz}px; height:${sz}px;
+      left:${Math.random()*100}vw;
+      background:${cols[Math.floor(Math.random()*cols.length)]};
+      border-radius:${Math.random()>.5?'50%':'2px'};
+      animation-duration:${1.4+Math.random()*1.8}s;
+      animation-delay:${Math.random()*.6}s;
+    `;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3500);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   ACTION DISPATCHER
+══════════════════════════════════════════════════════════ */
+function dispatchAction(el) {
+  if (!el) return;
+  const action = el.dataset.action;
+  SFX.select();
+
+  if      (action === 'goto-menu')     renderMenu();
+  else if (action === 'goto-category') renderCategory();
+  else if (action === 'select-cat')    startGame(el.dataset.cat);
+  else if (action === 'play-again')    startGame(S.category.id);
+  else if (el.classList.contains('ans-btn')) handleAnswer(el.dataset.opt);
+}
+
+function findTarget(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  return el.closest('[data-action], .ans-btn, .cat-card');
+}
+
+/* ══════════════════════════════════════════════════════════
+   CURSOR & DWELL
+══════════════════════════════════════════════════════════ */
+const cursorEl  = document.getElementById('cursor');
+const dwellEl   = cursorEl.querySelector('.c-dwell');
+
+let cx = -300, cy = -300;       // smooth cursor position
+let rawCx = -300, rawCy = -300; // raw from mediapipe
+let dwellTarget  = null;
+let dwellStart   = 0;
+let lastHovered  = null;
+const DWELL_MS   = 1400;
+
+function resetDwell() {
+  dwellTarget = null;
+  dwellStart  = 0;
+  cursorEl.classList.remove('dwelling');
+  cursorEl.style.setProperty('--dp', '0%');
+  if (lastHovered) { lastHovered.classList.remove('hovered'); lastHovered = null; }
+}
+
+function updateDwell(now) {
+  const target = findTarget(cx, cy);
+
+  if (target !== lastHovered) {
+    if (lastHovered) { lastHovered.classList.remove('hovered'); }
+    if (target)      { target.classList.add('hovered'); SFX.hover(); }
+    lastHovered = target;
+    dwellTarget = target;
+    dwellStart  = now;
+    cursorEl.classList.remove('dwelling');
+    cursorEl.style.setProperty('--dp', '0%');
+    return;
+  }
+
+  if (!target) {
+    cursorEl.classList.remove('dwelling');
+    cursorEl.style.setProperty('--dp', '0%');
+    return;
+  }
+
+  const pct = clamp((now - dwellStart) / DWELL_MS, 0, 1) * 100;
+  cursorEl.style.setProperty('--dp', pct + '%');
+  cursorEl.classList.add('dwelling');
+
+  if (pct >= 100) {
+    dispatchAction(target);
+    dwellStart = now + 800; // extra cooldown before next dwell
+    cursorEl.style.setProperty('--dp', '0%');
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   GESTURE DETECTION
+══════════════════════════════════════════════════════════ */
+function extendedY(lm, tip, pip) { return lm[tip].y < lm[pip].y; }
+
+function detectGesture(lm) {
+  // Pinch: thumb tip to index tip
+  const pdx = lm[4].x - lm[8].x, pdy = lm[4].y - lm[8].y;
+  if (Math.sqrt(pdx*pdx + pdy*pdy) < 0.07) return 'pinch';
+
+  const iExt = extendedY(lm, 8,  6);
+  const mExt = extendedY(lm, 12, 10);
+  const rExt = extendedY(lm, 16, 14);
+  const pExt = extendedY(lm, 20, 18);
+  const tExt = Math.abs(lm[4].x - lm[3].x) > 0.04;
+  const ext  = [iExt, mExt, rExt, pExt].filter(Boolean).length;
+
+  if (ext === 0) return 'fist';
+  if (ext === 4 && tExt) return 'open';
+  if (iExt && mExt && !rExt && !pExt) return 'peace';
+  if (iExt && !mExt && !rExt && !pExt) return 'point';
+  return 'none';
+}
+
+// Majority-vote smoothing over last N frames
+const GH = [];
+const GH_SIZE = 7;
+function smoothGesture(raw) {
+  GH.push(raw);
+  if (GH.length > GH_SIZE) GH.shift();
+  const cnt = {};
+  for (const g of GH) cnt[g] = (cnt[g] || 0) + 1;
+  let best = 'none', bestN = 0;
+  for (const [g, n] of Object.entries(cnt)) if (n > bestN) { bestN = n; best = g; }
+  return bestN >= Math.ceil(GH_SIZE / 2) ? best : 'none';
+}
+
+const GESTURE_ICONS = { none:'🤚', point:'👆', pinch:'👌', open:'✋', fist:'✊', peace:'✌️' };
+const GESTURE_NAMES = { none:'No Gesture', point:'Pointing', pinch:'Pinching', open:'Open Palm', fist:'Fist', peace:'Peace Sign' };
+
+function setGestureChip(g) {
+  document.getElementById('g-icon').textContent = GESTURE_ICONS[g] || '🤚';
+  document.getElementById('g-text').textContent = GESTURE_NAMES[g] || g;
+}
+
+/* ══════════════════════════════════════════════════════════
+   MEDIAPIPE
+══════════════════════════════════════════════════════════ */
+const videoEl  = document.getElementById('video');
+const hCanvas  = document.getElementById('hand-canvas');
+const hCtx     = hCanvas.getContext('2d');
+
+let lastGestureAct = 0;
+const G_COOLDOWN   = 650;
+
+function onResults(results) {
+  hCtx.clearRect(0, 0, hCanvas.width, hCanvas.height);
+
+  if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) {
+    if (S.handDetected) {
+      S.handDetected = false;
+      document.getElementById('hand-status').className   = 'not-detected';
+      document.getElementById('hand-status').textContent = '✋ Waiting for hand…';
+      cursorEl.style.display = 'none';
+      resetDwell();
+      setGestureChip('none');
+    }
+    return;
+  }
+
+  if (!S.handDetected) {
+    S.handDetected = true;
+    document.getElementById('hand-status').className   = 'detected';
+    document.getElementById('hand-status').textContent = '✅ Hand Detected';
+    cursorEl.style.display = 'block';
+  }
+
+  const lm = results.multiHandLandmarks[0];
+
+  // Draw skeleton on mini preview
+  if (typeof drawConnectors === 'function') {
+    drawConnectors(hCtx, lm, HAND_CONNECTIONS,
+      { color: 'rgba(6,182,212,0.55)', lineWidth: 1.5 });
+    drawLandmarks(hCtx, lm,
+      { color: 'rgba(255,255,255,0.8)', lineWidth: 1, radius: 2 });
+  }
+
+  // Map index tip to screen coords (mirror X since CSS mirrors video)
+  rawCx = (1 - lm[8].x) * window.innerWidth;
+  rawCy = lm[8].y * window.innerHeight;
+
+  // Exponential smoothing
+  cx = cx * 0.55 + rawCx * 0.45;
+  cy = cy * 0.55 + rawCy * 0.45;
+
+  cursorEl.style.left = cx + 'px';
+  cursorEl.style.top  = cy + 'px';
+
+  // Detect & smooth gesture
+  const raw     = detectGesture(lm);
+  const gesture = smoothGesture(raw);
+  S.gesture     = gesture;
+  setGestureChip(gesture);
+
+  // Cursor visual state
+  cursorEl.classList.remove('pinching','open-palm','fist','peace');
+  if (gesture === 'pinch')  cursorEl.classList.add('pinching');
+  if (gesture === 'open')   cursorEl.classList.add('open-palm');
+  if (gesture === 'fist')   cursorEl.classList.add('fist');
+  if (gesture === 'peace')  cursorEl.classList.add('peace');
+
+  const now = Date.now();
+
+  // Gesture-driven actions (with cooldown)
+  if (now - lastGestureAct > G_COOLDOWN) {
+
+    if (gesture === 'pinch') {
+      lastGestureAct = now;
+      const t = findTarget(cx, cy);
+      if (t) { dispatchAction(t); resetDwell(); }
+    }
+
+    else if (gesture === 'open') {
+      // Open palm = confirm whatever is hovered
+      lastGestureAct = now;
+      if (lastHovered) { dispatchAction(lastHovered); resetDwell(); }
+    }
+
+    else if (gesture === 'fist') {
+      lastGestureAct = now;
+      SFX.back();
+      if (S.screen === 'category') renderMenu();
+      else if (S.screen === 'result') renderCategory();
+    }
+
+    else if (gesture === 'peace') {
+      // Peace / two-fingers = advance when in feedback state
+      lastGestureAct = now;
+      if (S.feedbackActive) {
+        hideFeedback();
+        S.feedbackActive = false;
+        S.qIndex++;
+        renderQuestion();
+      }
+    }
+  }
+
+  // Dwell only when pointing or idle (not on action gestures)
+  if (gesture === 'point' || gesture === 'none') {
+    updateDwell(now);
+  } else {
+    // Reset dwell progress while doing non-point gesture
+    if (dwellTarget) {
+      cursorEl.classList.remove('dwelling');
+      cursorEl.style.setProperty('--dp', '0%');
+      dwellStart = now;
+    }
+  }
+}
+
+/* Bootstrap MediaPipe Hands */
+const hands = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+
+hands.setOptions({
+  maxNumHands:            1,
+  modelComplexity:        1,
+  minDetectionConfidence: 0.72,
+  minTrackingConfidence:  0.55,
+});
+
+hands.onResults(onResults);
+
+const camera = new Camera(videoEl, {
+  onFrame: async () => { await hands.send({ image: videoEl }); },
+  width: 640, height: 480,
+});
+
+camera.start()
+  .then(() => {
+    hCanvas.width  = 200;
+    hCanvas.height = 150;
+    // Give MediaPipe WASM a moment to warm up then show menu
+    setTimeout(() => renderMenu(), 2000);
+  })
+  .catch(() => {
+    const errEl = document.getElementById('load-error');
+    errEl.style.display = 'block';
+    document.querySelector('.spinner').style.display = 'none';
+    document.querySelector('.load-sub').style.display = 'none';
+  });
+</script>
+</body>
+</html>
