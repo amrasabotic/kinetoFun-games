@@ -1,0 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  cursor: none !important;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+html, body {
+  font-family: 'Nunito', system-ui, sans-serif;
+  background: #0f0c29;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+  user-select: none;
+}
+
+/* TV-optimized base font size */
+:root {
+  font-size: 16px;
+}
+
+@media (min-width: 1920px) {
+  :root {
+    font-size: 18px;
+  }
+}
+
+/* Prevent text selection */
+* {
+  -webkit-user-select: none;
+  user-select: none;
+}
