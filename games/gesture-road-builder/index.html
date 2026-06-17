@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gesture Road Builder</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas" width="960" height="540"></canvas>
+    <video id="webcam" autoplay playsinline muted></video>
+    <div id="camera-preview">
+      <canvas id="camera-canvas" width="192" height="144"></canvas>
+      <div id="tracking-bar">
+        <div id="tracking-dot"></div>
+        <span id="tracking-label">Initializing…</span>
+      </div>
+    </div>
+    <div id="gesture-panel">
+      <div id="gesture-icon-display"></div>
+      <div id="gesture-name-display"></div>
+      <div id="gesture-ring-container">
+        <svg id="gesture-ring" viewBox="0 0 44 44" width="44" height="44">
+          <circle cx="22" cy="22" r="18" fill="none" stroke="#ffffff22" stroke-width="4"/>
+          <circle id="ring-progress" cx="22" cy="22" r="18" fill="none"
+                  stroke="#00e5ff" stroke-width="4"
+                  stroke-dasharray="0 113" stroke-linecap="round"
+                  transform="rotate(-90 22 22)"/>
+        </svg>
+      </div>
+    </div>
+    <div id="warning-banner" class="hidden"></div>
+  </div>
+
+  <!-- CDN Libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+  <!-- Utilities -->
+  <script src="js/utils/MathUtils.js"></script>
+  <script src="js/utils/ParticleSystem.js"></script>
+
+  <!-- Engine -->
+  <script src="js/engine/SaveSystem.js"></script>
+
+  <!-- Gesture -->
+  <script src="js/gesture/CameraManager.js"></script>
+  <script src="js/gesture/HandTracker.js"></script>
+  <script src="js/gesture/GestureManager.js"></script>
+
+  <!-- Physics & Drawing -->
+  <script src="js/engine/PhysicsManager.js"></script>
+  <script src="js/engine/DrawingManager.js"></script>
+  <script src="js/engine/VehicleManager.js"></script>
+
+  <!-- Levels -->
+  <script src="js/levels/CampaignLevels.js"></script>
+  <script src="js/levels/EndlessGenerator.js"></script>
+  <script src="js/levels/LevelManager.js"></script>
+
+  <!-- UI -->
+  <script src="js/ui/HUD.js"></script>
+  <script src="js/ui/MenuSystem.js"></script>
+  <script src="js/ui/UIManager.js"></script>
+
+  <!-- Game Engine & Entry -->
+  <script src="js/engine/GameEngine.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
