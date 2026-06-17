@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800;900&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0F0A1E;
+  font-family: 'Nunito', sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#__next { width: 100%; height: 100%; }
+
+canvas { display: block; touch-action: none; }
+
+@keyframes popIn {
+  0% { transform: scale(0.5); opacity: 0; }
+  70% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 12px rgba(124, 58, 237, 0.6); }
+  50% { box-shadow: 0 0 30px rgba(124, 58, 237, 1), 0 0 60px rgba(245, 158, 11, 0.4); }
+}
+
+@keyframes dwell-ring {
+  from { stroke-dashoffset: 157; }
+  to { stroke-dashoffset: 0; }
+}
+
+.pop-in { animation: popIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+.fade-in { animation: fadeIn 0.4s ease forwards; }
+.pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+
+.game-btn {
+  @apply relative flex items-center justify-center gap-3 rounded-2xl font-bold text-white
+         cursor-pointer select-none transition-all duration-150
+         active:scale-95;
+  font-family: 'Fredoka One', sans-serif;
+}
+
+.dwell-progress {
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  pointer-events: none;
+}
