@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Monster Dodge — Hand Gesture Edition</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;user-select:none;}
+    html,body{width:100%;height:100%;overflow:hidden;background:#000;
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+    #gc{display:block;position:fixed;inset:0;width:100vw;height:100vh;}
+    #cam-wrap{
+      position:fixed;bottom:14px;right:14px;width:160px;height:120px;
+      border-radius:12px;overflow:hidden;border:2px solid rgba(255,255,255,.25);
+      z-index:500;background:#111;
+    }
+    #cam-wrap video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block;}
+    #hcv{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);}
+    #cam-lbl{position:absolute;top:5px;left:7px;font-size:9px;
+      color:rgba(255,255,255,.6);font-weight:700;letter-spacing:.5px;}
+    #loading{position:fixed;inset:0;background:#050010;display:flex;flex-direction:column;
+      align-items:center;justify-content:center;gap:16px;z-index:1000;}
+    #loading h1{color:#fff;font-size:28px;font-weight:800;letter-spacing:2px;}
+    #loading p{color:rgba(255,255,255,.7);font-size:14px;text-align:center;
+      max-width:280px;line-height:1.6;}
+    .spin{width:36px;height:36px;border:3px solid rgba(255,255,255,.1);
+      border-top-color:#ff4466;border-radius:50%;animation:sp .8s linear infinite;}
+    @keyframes sp{to{transform:rotate(360deg);}}
+    #lmsg{color:rgba(255,255,255,.4);font-size:12px;}
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <h1>⚔ MONSTER DODGE</h1>
+  <div class="spin"></div>
+  <p>Loading hand tracking…<br>Please allow camera access.</p>
+  <div id="lmsg"></div>
+</div>
+
+<canvas id="gc"></canvas>
+
+<div id="cam-wrap">
+  <video id="vid" playsinline></video>
+  <canvas id="hcv"></canvas>
+  <div id="cam-lbl">HANDS</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js" crossorigin="anonymous"></script>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   1. CANVAS
+═══════════════════════════════════════════════════════════════════════ */
+const cv = document.getElementById('gc');
+const cx = cv.getContext('2d');
+let W, H;
+function resize(){ W = cv.width = window.innerWidth; H = cv.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+/* ═══════════════════════════════════════════════════════════════════════
+   2. AUDIO  (Web Audio API only — no files)
+═══════════════════════════════════════════════════════════════════════ */
+let AC;
+function getAC(){ if(!AC) AC=new(window.AudioContext||window.webkitAudioContext)(); return AC; }
+
+function beep(freq,dur,type='sine',vol=0.3,delay=0){
+  try{
+    const a=getAC(),o=a.createOscillator(),g=a.createGain();
+    o.connect(g);g.connect(a.destination);
+    o.type=type;o.frequency.value=freq;
+    g.gain.setValueAtTime(vol,a.currentTime+delay);
+    g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+delay+dur);
+    o.start(a.currentTime+delay);o.stop(a.currentTime+delay+dur+0.05);
+  }catch(e){}
+}
+
+function sfxSuccess()  { [523,659,784].forEach((f,i)=>beep(f,0.18,'sine',0.22,i*0.06)); }
+function sfxFail()     { beep(110,0.5,'sawtooth',0.28); }
+function sfxCombo()    { [784,880,988,1047].forEach((f,i)=>beep(f,0.14,'triangle',0.2,i*0.07)); }
+function sfxCountdown(){ beep(660,0.12,'sine',0.3); }
+function sfxGo()       { beep(880,0.2,'sine',0.4);beep(1100,0.25,'sine',0.35,0.15); }
+function sfxBlock()    { beep(200,0.12,'square',0.25);beep(160,0.18,'square',0.2,0.1); }
+function sfxDodge()    { beep(900,0.08,'sine',0.2);beep(1100,0.1,'sine',0.15,0.08); }
+function sfxSpecial()  { [440,550,660,880].forEach((f,i)=>beep(f,0.2,'triangle',0.28,i*0.05)); }
+function sfxHurt()     { beep(80,0.35,'sawtooth',0.4); }
+function sfxIncoming() { beep(440,0.05,'sine',0.08); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   3. CONSTANTS & CONFIG
+═══════════════════════════════════════════════════════════════════════ */
+const LANE_X       = [0.22, 0.5, 0.78];  // fraction of W
+const PLAYER_Y_F   = 0.78;
+const HIT_Y_F      = 0.67;               // window opens when monster passes here
+const MISS_Y_F     = 0.84;               // miss if not handled by here
+const LIVES_MAX    = 3;
+const CALIB_DUR    = 3000;               // ms
+const DWELL        = 900;                // ms to hold hover
+
+const MTYPES = {
+  HIGH:    {color:'#4dc8ff',glow:'#0088cc',symbol:'✋',label:'DODGE',   gesture:'palm',     spd:0.10,sz:34},
+  STRONG:  {color:'#ff4444',glow:'#cc1100',symbol:'✊',label:'BLOCK',   gesture:'fist',     spd:0.08,sz:40},
+  FAST:    {color:'#ffe04d',glow:'#cc8800',symbol:'👋',label:'SWIPE',   gesture:'swipe',    spd:0.17,sz:30},
+  SPECIAL: {color:'#cc88ff',glow:'#8833cc',symbol:'✌️',label:'SPECIAL', gesture:'twohands', spd:0.07,sz:48},
+};
+const MKEYS = Object.keys(MTYPES);
+
+// Gesture tuning
+const SMOOTH_N      = 10;     // landmark history frames
+const DEBOUNCE_MS   = 380;    // min ms between same gesture
+const SWIPE_WIN_MS  = 380;    // velocity window
+const SWIPE_THRESH  = 0.10;   // normalized screen-width per window
+const FIST_RATIO    = 1.45;   // tipDist < mcpDist * FIST_RATIO → curled
+const PALM_RATIO    = 1.85;   // tipDist > mcpDist * PALM_RATIO → extended
+
+/* ═══════════════════════════════════════════════════════════════════════
+   4. GESTURE ENGINE
+   Handles: landmark smoothing, fist / palm / swipe / two-hand detection,
+   per-gesture debounce, calibration baseline.
+═══════════════════════════════════════════════════════════════════════ */
+let handCount     = 0;
+let smoothedHands = [null, null];
+let lmHistory     = [[], []];   // ring buffers of raw landmark arrays
+let wristTrail    = [];         // [{x:0-1, t:ms}] for swipe velocity
+let calibSamples  = [];
+let calibBaseline = null;       // {wx, wy} neutral wrist position (unused in detection but set for future use)
+
+const debounceTs  = {};         // gesture → last trigger ms
+
+function canTrigger(name){
+  const now=Date.now();
+  if(!debounceTs[name]||now-debounceTs[name]>DEBOUNCE_MS){ debounceTs[name]=now; return true; }
+  return false;
+}
+
+function pushHistory(idx, lm){
+  lmHistory[idx].push(lm);
+  if(lmHistory[idx].length>SMOOTH_N) lmHistory[idx].shift();
+}
+
+function getSmoothed(idx){
+  const h=lmHistory[idx];
+  if(!h.length) return null;
+  return Array.from({length:21},(_,li)=>({
+    x: h.reduce((s,f)=>s+f[li].x,0)/h.length,
+    y: h.reduce((s,f)=>s+f[li].y,0)/h.length,
+    z: h.reduce((s,f)=>s+f[li].z,0)/h.length,
+  }));
+}
+
+// Distance-ratio fist: tipToWrist < mcpToWrist * FIST_RATIO for ≥3 fingers
+function isFist(lm){
+  if(!lm) return false;
+  const w=lm[0];
+  const pairs=[[8,5],[12,9],[16,13],[20,17]];
+  let curled=0;
+  for(const [ti,mi] of pairs){
+    const td=Math.hypot(lm[ti].x-w.x,lm[ti].y-w.y);
+    const md=Math.hypot(lm[mi].x-w.x,lm[mi].y-w.y);
+    if(md>0.01 && td<md*FIST_RATIO) curled++;
+  }
+  return curled>=3;
+}
+
+// Distance-ratio open palm: tipToWrist > mcpToWrist * PALM_RATIO for ≥3 fingers
+function isPalm(lm){
+  if(!lm) return false;
+  const w=lm[0];
+  const pairs=[[8,5],[12,9],[16,13],[20,17]];
+  let ext=0;
+  for(const [ti,mi] of pairs){
+    const td=Math.hypot(lm[ti].x-w.x,lm[ti].y-w.y);
+    const md=Math.hypot(lm[mi].x-w.x,lm[mi].y-w.y);
+    if(md>0.01 && td>md*PALM_RATIO) ext++;
+  }
+  return ext>=3;
+}
+
+// Velocity-based swipe on mirrored wrist X (screen space 0–1)
+function checkSwipe(){
+  if(wristTrail.length<3) return null;
+  const now=Date.now();
+  const recent=wristTrail.filter(p=>now-p.t<SWIPE_WIN_MS);
+  if(recent.length<3) return null;
+  const dx=recent[recent.length-1].x - recent[0].x;
+  const dt=recent[recent.length-1].t - recent[0].t;
+  if(dt<80) return null;
+  if(dx < -SWIPE_THRESH) return 'swipeLeft';
+  if(dx >  SWIPE_THRESH) return 'swipeRight';
+  return null;
+}
+
+// Active gestures this frame, populated in onHandResults
+let activeGestures = new Set();
+let gestureFlash   = null;   // {name, t} for visual echo above player
+
+function flashGesture(name){ gestureFlash={name,t:Date.now()}; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   5. MEDIAPIPE HANDS
+═══════════════════════════════════════════════════════════════════════ */
+const vidEl = document.getElementById('vid');
+const hcv   = document.getElementById('hcv');
+const hctx  = hcv.getContext('2d');
+let mpCam   = null;
+let mpHands = null;
+
+function onHandResults(res){
+  hcv.width  = hcv.offsetWidth  || 160;
+  hcv.height = hcv.offsetHeight || 120;
+  hctx.clearRect(0,0,hcv.width,hcv.height);
+
+  activeGestures.clear();
+  const lms = res.multiHandLandmarks || [];
+  handCount  = lms.length;
+
+  // Clear history for disappeared hands
+  for(let i=lms.length;i<2;i++){
+    lmHistory[i]=[];
+    smoothedHands[i]=null;
+  }
+
+  lms.forEach((raw,idx)=>{
+    if(idx>=2) return;
+    pushHistory(idx, raw);
+    smoothedHands[idx]=getSmoothed(idx);
+    const color=['rgba(255,77,196,.9)','rgba(77,200,255,.9)'][idx%2];
+    drawConnectors(hctx,raw,HAND_CONNECTIONS,{color,lineWidth:1.5});
+    drawLandmarks(hctx,raw,{color:'#fff',lineWidth:1,radius:2});
+  });
+
+  const primary=smoothedHands[0]||smoothedHands[1];
+
+  if(primary){
+    // Mirror x: natural right-hand-moves-right feel
+    const wx = 1-primary[0].x;
+    wristTrail.push({x:wx,t:Date.now()});
+    const cutoff=Date.now()-SWIPE_WIN_MS*1.5;
+    wristTrail=wristTrail.filter(p=>p.t>cutoff);
+
+    // Accumulate calibration samples; skip gesture logic during calibration
+    if(gs==='calibrate'){
+      calibSamples.push({x:wx,y:primary[0].y});
+      return;
+    }
+
+    if(isFist(primary))      activeGestures.add('fist');
+    else if(isPalm(primary)) activeGestures.add('palm');
+
+    const swipe=checkSwipe();
+    if(swipe) activeGestures.add(swipe);
+  }
+
+  // Two-hands: both visible + both palm or both raised
+  if(handCount>=2 && smoothedHands[0] && smoothedHands[1]){
+    const bothPalm  = isPalm(smoothedHands[0]) && isPalm(smoothedHands[1]);
+    const bothRaised= smoothedHands[0][0].y<0.60 && smoothedHands[1][0].y<0.60;
+    if(bothPalm||bothRaised) activeGestures.add('twohands');
+  }
+
+  if(gs==='play') processGestures();
+}
+
+function setupMediaPipe(){
+  mpHands=new Hands({
+    locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`
+  });
+  mpHands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:0.7,minTrackingConfidence:0.5});
+  mpHands.onResults(onHandResults);
+
+  mpCam=new Camera(vidEl,{
+    onFrame:async()=>{ await mpHands.send({image:vidEl}); },
+    width:320,height:240,
+  });
+  mpCam.start()
+    .then(()=>document.getElementById('loading').style.display='none')
+    .catch(e=>{
+      document.getElementById('lmsg').textContent='⚠ '+e.message;
+      setTimeout(()=>document.getElementById('loading').style.display='none',2500);
+    });
+}
+
+function waitForMP(cb,n=0){
+  if(typeof Hands!=='undefined'&&typeof Camera!=='undefined') cb();
+  else if(n>60){ document.getElementById('lmsg').textContent='⚠ Load failed.';
+    setTimeout(()=>document.getElementById('loading').style.display='none',2000); }
+  else setTimeout(()=>waitForMP(cb,n+1),300);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   6. PARTICLES
+═══════════════════════════════════════════════════════════════════════ */
+let parts        = [];
+let floatTexts   = [];
+
+function spawnBurst(x,y,color,n=18){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2, s=2+Math.random()*6;
+    const life=40+Math.random()*30;
+    parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-2,r:2+Math.random()*5,color,life,max:life});
+  }
+}
+
+function spawnFloatText(x,y,text,color){
+  floatTexts.push({x,y,text,color,life:55,max:55,vy:-1.6});
+}
+
+function tickParts(){
+  parts=parts.filter(p=>{
+    p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.vx*=0.96;p.life--;return p.life>0;
+  });
+  floatTexts=floatTexts.filter(t=>{
+    t.y+=t.vy;t.vy*=0.98;t.life--;return t.life>0;
+  });
+}
+
+function drawParts(){
+  parts.forEach(p=>{
+    cx.globalAlpha=p.life/p.max;
+    cx.fillStyle=p.color;
+    cx.beginPath();cx.arc(p.x,p.y,p.r,0,Math.PI*2);cx.fill();
+  });
+  floatTexts.forEach(t=>{
+    cx.globalAlpha=t.life/t.max;
+    cx.font='bold 22px sans-serif';
+    cx.textAlign='center';
+    cx.fillStyle=t.color;
+    cx.fillText(t.text,t.x,t.y);
+  });
+  cx.globalAlpha=1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   7. LEADERBOARD  (localStorage)
+═══════════════════════════════════════════════════════════════════════ */
+const KEY_BEST_SCORE = 'monsterDodge_bestScore';
+const KEY_BEST_TIME  = 'monsterDodge_bestTime';
+
+function getBestScore(){ return parseInt(localStorage.getItem(KEY_BEST_SCORE)||'0'); }
+function getBestTime() { return parseInt(localStorage.getItem(KEY_BEST_TIME) ||'0'); }
+
+function saveBests(score,secs){
+  if(score>getBestScore()) localStorage.setItem(KEY_BEST_SCORE,String(score));
+  if(secs >getBestTime() ) localStorage.setItem(KEY_BEST_TIME, String(secs));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   8. STATE MACHINE
+═══════════════════════════════════════════════════════════════════════ */
+let gs = 'menu';   // menu | calibrate | countdown | play | results
+
+let score        = 0;
+let streak       = 0;
+let maxStreak    = 0;
+let lives        = LIVES_MAX;
+let gameTime     = 0;       // seconds elapsed in play
+let countdownVal = 3;
+let countdownTimer = 0;
+let calibTimer   = 0;
+let screenFlash  = null;   // {color, alpha, t}
+
+function startCalibration(){
+  gs='calibrate';
+  calibTimer = CALIB_DUR/1000;
+  calibSamples=[];
+  calibBaseline=null;
+  wristTrail=[];
+}
+
+function startCountdown(){
+  gs='countdown';
+  countdownVal=3;
+  countdownTimer=3.6;   // 3→2→1→GO
+}
+
+function startPlay(){
+  gs='play';
+  score=0;streak=0;maxStreak=0;
+  lives=LIVES_MAX;gameTime=0;
+  monsters=[];spawnTimer=1.8;
+  playerLane=1;playerX=LANE_X[1]*W;
+  parts=[];floatTexts=[];
+  Object.keys(debounceTs).forEach(k=>delete debounceTs[k]);
+  wristTrail=[];
+  getAC();
+}
+
+function endGame(){
+  gs='results';
+  saveBests(score,Math.floor(gameTime));
+  sfxFail();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   9. MONSTER SYSTEM
+═══════════════════════════════════════════════════════════════════════ */
+let monsters      = [];
+let monsterIdCnt  = 0;
+let spawnTimer    = 0;
+
+function spawnInterval(){ return Math.max(0.75, 2.6 - score*0.018); }
+function monsterSpeedBonus(){ return score*0.0008; }
+
+function spawnMonster(){
+  const type=MKEYS[Math.floor(Math.random()*MKEYS.length)];
+  const lane=Math.floor(Math.random()*3);
+  const cfg=MTYPES[type];
+  const life=50+Math.random()*30;
+  monsters.push({
+    id:monsterIdCnt++,
+    type,lane,cfg,
+    y:  -80,
+    spd:cfg.spd + monsterSpeedBonus(),
+    st: 'active',   // active | dead
+    deadTimer:0,
+    windowOpen:false,
+    wobble:Math.random()*Math.PI*2,
+  });
+  sfxIncoming();
+}
+
+function updateMonsters(dt){
+  spawnTimer-=dt;
+  if(spawnTimer<=0){ spawnMonster(); spawnTimer=spawnInterval(); }
+
+  const hitY  = H*HIT_Y_F;
+  const missY = H*MISS_Y_F;
+
+  for(let i=monsters.length-1;i>=0;i--){
+    const m=monsters[i];
+
+    if(m.st==='dead'){
+      m.deadTimer-=dt;
+      if(m.deadTimer<=0) monsters.splice(i,1);
+      continue;
+    }
+
+    m.y   += m.spd*H*dt;
+    m.wobble += dt*2.4;
+
+    if(!m.windowOpen && m.y>=hitY) m.windowOpen=true;
+
+    // Miss — player failed to react
+    if(m.y>=missY && m.st==='active'){
+      m.st='dead'; m.deadTimer=0.4;
+      lives--;
+      streak=0;
+      const lx=LANE_X[m.lane]*W;
+      spawnBurst(lx,m.y,'#ff3333',14);
+      spawnFloatText(lx,m.y-28,'MISS!','#ff3333');
+      screenFlash={color:'#ff0000',alpha:0.35,t:Date.now()};
+      sfxHurt();
+      if(lives<=0) endGame();
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   10. PLAYER SYSTEM
+═══════════════════════════════════════════════════════════════════════ */
+let playerLane    = 1;
+let playerX       = 0;
+let playerAction  = null;   // 'block'|'dodge'|'swipe'|'special'
+let playerActTime = 0;
+
+/* ═══════════════════════════════════════════════════════════════════════
+   11. COLLISION & GESTURE → GAME LOGIC
+═══════════════════════════════════════════════════════════════════════ */
+function processGestures(){
+  for(const g of activeGestures){
+    if(g==='swipeLeft' && canTrigger('swipeLeft')){
+      const from=playerLane;
+      if(playerLane>0) playerLane--;
+      wristTrail=[];
+      playerAction='swipe'; playerActTime=Date.now();
+      flashGesture('swipeLeft');
+      tryMatch('swipe',from);
+    }
+    if(g==='swipeRight' && canTrigger('swipeRight')){
+      const from=playerLane;
+      if(playerLane<2) playerLane++;
+      wristTrail=[];
+      playerAction='swipe'; playerActTime=Date.now();
+      flashGesture('swipeRight');
+      tryMatch('swipe',from);
+    }
+    if(g==='fist' && canTrigger('fist')){
+      playerAction='block'; playerActTime=Date.now();
+      flashGesture('fist');
+      sfxBlock();
+      tryMatch('fist',playerLane);
+    }
+    if(g==='palm' && canTrigger('palm')){
+      playerAction='dodge'; playerActTime=Date.now();
+      flashGesture('palm');
+      sfxDodge();
+      tryMatch('palm',playerLane);
+    }
+    if(g==='twohands' && canTrigger('twohands')){
+      playerAction='special'; playerActTime=Date.now();
+      flashGesture('twohands');
+      sfxSpecial();
+      tryMatch('twohands',playerLane);
+    }
+  }
+}
+
+function tryMatch(gesture, lane){
+  for(let i=monsters.length-1;i>=0;i--){
+    const m=monsters[i];
+    if(m.st!=='active'||!m.windowOpen) continue;
+
+    let hit=false;
+    if(gesture==='swipe'){
+      // Any open-window FAST monster in the current or prior lane
+      if(m.type==='FAST'&&(m.lane===playerLane||m.lane===lane)) hit=true;
+    } else {
+      if(m.cfg.gesture===gesture && m.lane===playerLane) hit=true;
+    }
+
+    if(hit){ resolveHit(i); return; }
+  }
+}
+
+function resolveHit(idx){
+  const m=monsters[idx];
+  m.st='dead'; m.deadTimer=0.45;
+  streak++;
+  if(streak>maxStreak) maxStreak=streak;
+  const pts=10+(streak>1?streak*5:0);
+  score+=pts;
+  const lx=LANE_X[m.lane]*W;
+  spawnBurst(lx,m.y,m.cfg.color,22);
+  spawnFloatText(lx,m.y-32, streak>2?`${pts}pts ×${streak}`:`+${pts}`, '#00ff88');
+  if(streak>=3){ sfxCombo(); spawnFloatText(lx,m.y-62,`🔥 COMBO ×${streak}`,'#ffe04d'); }
+  else sfxSuccess();
+  screenFlash={color:'#00ff88',alpha:0.12,t:Date.now()};
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   12. DRAW HELPERS
+═══════════════════════════════════════════════════════════════════════ */
+function txt(s,x,y,font,color,align='center'){
+  cx.fillStyle=color;cx.font=font;cx.textAlign=align;cx.fillText(s,x,y);
+}
+function card(x,y,w,h,r,fill,stroke,lw){
+  cx.beginPath();cx.roundRect(x,y,w,h,r);
+  if(fill){cx.fillStyle=fill;cx.fill();}
+  if(stroke){cx.strokeStyle=stroke;cx.lineWidth=lw||2;cx.stroke();}
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   13. DRAW: BACKGROUND & ARENA
+═══════════════════════════════════════════════════════════════════════ */
+function drawBackground(){
+  const bg=cx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,'#050010');
+  bg.addColorStop(1,'#0d0025');
+  cx.fillStyle=bg; cx.fillRect(0,0,W,H);
+
+  // Static star field (deterministic from index)
+  cx.fillStyle='rgba(255,255,255,0.35)';
+  for(let i=0;i<70;i++){
+    const sx=(((i*1373+991)%997)/997)*W;
+    const sy=(((i*2377+487)%983)/983)*H*0.90;
+    const sr=0.5+((i*739)%5)/10;
+    cx.beginPath();cx.arc(sx,sy,sr,0,Math.PI*2);cx.fill();
+  }
+
+  // Lane columns
+  const laneW=W*0.185;
+  for(let l=0;l<3;l++){
+    const lx=LANE_X[l]*W;
+    cx.fillStyle=l===playerLane?'rgba(255,255,255,0.04)':'rgba(255,255,255,0.015)';
+    cx.fillRect(lx-laneW/2,0,laneW,H);
+    cx.strokeStyle='rgba(100,40,220,0.22)';
+    cx.lineWidth=1; cx.setLineDash([18,14]);
+    cx.beginPath();cx.moveTo(lx-laneW/2,0);cx.lineTo(lx-laneW/2,H);cx.stroke();
+    cx.beginPath();cx.moveTo(lx+laneW/2,0);cx.lineTo(lx+laneW/2,H);cx.stroke();
+    cx.setLineDash([]);
+  }
+
+  // Danger zone line
+  cx.strokeStyle='rgba(255,68,102,0.25)';
+  cx.lineWidth=1.5; cx.setLineDash([10,8]);
+  cx.beginPath();cx.moveTo(0,H*MISS_Y_F);cx.lineTo(W,H*MISS_Y_F);cx.stroke();
+  cx.setLineDash([]);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   14. DRAW: PLAYER
+═══════════════════════════════════════════════════════════════════════ */
+function drawPlayer(){
+  const targetX=LANE_X[playerLane]*W;
+  playerX+=(targetX-playerX)*0.20;
+  const py=H*PLAYER_Y_F;
+  const age=Date.now()-playerActTime;
+  const acting=playerAction&&age<420;
+
+  // Ground shadow
+  cx.fillStyle='rgba(0,0,0,0.35)';
+  cx.beginPath();cx.ellipse(playerX,py+42,24,7,0,0,Math.PI*2);cx.fill();
+
+  const bodyClr = acting
+    ? ({block:'#cc2200',dodge:'#006699',swipe:'#666600',special:'#7722aa'}[playerAction]||'#223355')
+    : '#223355';
+
+  if(acting){
+    cx.shadowColor=bodyClr; cx.shadowBlur=24;
+  }
+
+  const sc=acting?1.08:1;
+  cx.save();
+  cx.translate(playerX,py);
+  cx.scale(sc,sc);
+
+  // Legs
+  cx.fillStyle='#2a3a55';
+  cx.fillRect(-11,10,9,24);
+  cx.fillRect(2,10,9,24);
+
+  // Body
+  cx.fillStyle=bodyClr;
+  cx.beginPath();cx.roundRect(-15,-12,30,24,5);cx.fill();
+
+  // Arms — pose-aware
+  cx.fillStyle='#2a3a55';
+  if(playerAction==='block'&&acting){
+    // Arms crossed in guard
+    cx.fillRect(-24,-10,48,10);
+    cx.fillStyle='#ffccaa';
+    cx.beginPath();cx.arc(-24,-5,8,0,Math.PI*2);cx.fill();
+    cx.beginPath();cx.arc(24,-5,8,0,Math.PI*2);cx.fill();
+  } else if(playerAction==='dodge'&&acting){
+    // Arms wide open
+    cx.fillRect(-34,-14,18,7);
+    cx.fillRect(16,-14,18,7);
+  } else if(playerAction==='special'&&acting){
+    // Both arms raised
+    cx.fillRect(-24,-34,9,22);
+    cx.fillRect(15,-34,9,22);
+  } else if(playerAction==='swipe'&&acting){
+    // One arm swinging
+    cx.fillRect(-26,-8,18,8);
+    cx.fillRect(8,-8,18,8);
+  } else {
+    cx.fillRect(-24,-8,9,16);
+    cx.fillRect(15,-8,9,16);
+  }
+
+  // Head
+  cx.fillStyle='#ffccaa';
+  cx.beginPath();cx.arc(0,-22,13,0,Math.PI*2);cx.fill();
+  // Headband
+  cx.fillStyle=bodyClr;
+  cx.fillRect(-13,-27,26,9);
+  // Eyes
+  cx.fillStyle='#fff';
+  cx.beginPath();cx.ellipse(-4,-24,3,2.5,0,0,Math.PI*2);cx.fill();
+  cx.beginPath();cx.ellipse(4,-24,3,2.5,0,0,Math.PI*2);cx.fill();
+  cx.fillStyle='#000';
+  cx.beginPath();cx.ellipse(-4,-24,1.5,1.5,0,0,Math.PI*2);cx.fill();
+  cx.beginPath();cx.ellipse(4,-24,1.5,1.5,0,0,Math.PI*2);cx.fill();
+
+  cx.restore();
+  cx.shadowBlur=0;
+
+  // Floating gesture echo
+  if(acting && gestureFlash){
+    const icons={fist:'✊',palm:'✋',swipeLeft:'👈',swipeRight:'👉',twohands:'✌️'};
+    const icon=icons[gestureFlash.name]||'';
+    cx.globalAlpha=1-age/420;
+    cx.font='30px serif';cx.textAlign='center';
+    cx.fillText(icon, playerX, py-70-(age/420)*22);
+    cx.globalAlpha=1;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   15. DRAW: MONSTERS
+═══════════════════════════════════════════════════════════════════════ */
+function drawMonster(m){
+  if(m.st==='dead') cx.globalAlpha=Math.max(0,m.deadTimer/0.45);
+
+  const lx=LANE_X[m.lane]*W;
+  const {color,glow,symbol,label,sz}=m.cfg;
+  const t=Date.now()/1000;
+
+  cx.shadowColor=glow;
+  cx.shadowBlur=m.windowOpen?28:10;
+
+  if(m.type==='HIGH'){
+    const float=Math.sin(m.wobble)*9;
+    cx.fillStyle=color;
+    cx.beginPath();cx.arc(lx,m.y+float,sz,0,Math.PI*2);cx.fill();
+    cx.fillStyle='rgba(255,255,255,0.35)';
+    cx.beginPath();cx.arc(lx-sz*0.22,m.y+float-sz*0.28,sz*0.3,0,Math.PI*2);cx.fill();
+    // Ghost tails
+    cx.fillStyle=color+'55';
+    cx.beginPath();cx.arc(lx-sz-14,m.y+float,sz*0.7,sz*0.25,0,Math.PI*2);cx.fill();
+    cx.beginPath();cx.arc(lx+sz+14,m.y+float,sz*0.7,sz*0.25,0,Math.PI*2);cx.fill();
+
+  } else if(m.type==='STRONG'){
+    // Armored block
+    cx.fillStyle=color;
+    cx.beginPath();cx.roundRect(lx-sz,m.y-sz,sz*2,sz*2,8);cx.fill();
+    cx.strokeStyle='#ff9999'; cx.lineWidth=3;
+    cx.strokeRect(lx-sz+5,m.y-sz+5,sz*2-10,sz*2-10);
+    // Rotating spikes
+    for(let s=0;s<4;s++){
+      const a=(s/4)*Math.PI*2+m.wobble*0.5;
+      cx.fillStyle='#dd1100';
+      cx.beginPath();
+      cx.moveTo(lx+Math.cos(a)*sz,         m.y+Math.sin(a)*sz);
+      cx.lineTo(lx+Math.cos(a)*(sz+16),    m.y+Math.sin(a)*(sz+16));
+      cx.lineTo(lx+Math.cos(a+0.35)*sz,    m.y+Math.sin(a+0.35)*sz);
+      cx.fill();
+    }
+    // Eyes
+    cx.fillStyle='#ffaa00';
+    cx.beginPath();cx.arc(lx-9,m.y-6,6,0,Math.PI*2);cx.fill();
+    cx.beginPath();cx.arc(lx+9,m.y-6,6,0,Math.PI*2);cx.fill();
+    cx.fillStyle='#000';
+    cx.beginPath();cx.arc(lx-9,m.y-6,2.5,0,Math.PI*2);cx.fill();
+    cx.beginPath();cx.arc(lx+9,m.y-6,2.5,0,Math.PI*2);cx.fill();
+
+  } else if(m.type==='FAST'){
+    // Lightning bolt
+    cx.fillStyle=color;
+    cx.beginPath();
+    cx.moveTo(lx+11,m.y-sz);
+    cx.lineTo(lx-5, m.y-4);
+    cx.lineTo(lx+9, m.y-4);
+    cx.lineTo(lx-11,m.y+sz);
+    cx.lineTo(lx+5, m.y+4);
+    cx.lineTo(lx-9, m.y+4);
+    cx.closePath();cx.fill();
+    // Speed streaks
+    cx.strokeStyle=color+'55'; cx.lineWidth=2;
+    for(let s=1;s<=3;s++){
+      cx.beginPath();cx.moveTo(lx-22,m.y-s*11);cx.lineTo(lx+22,m.y-s*11);cx.stroke();
+    }
+
+  } else if(m.type==='SPECIAL'){
+    const pulse=1+Math.sin(m.wobble*1.8)*0.14;
+    // Outer aura rings
+    cx.strokeStyle=color+'44'; cx.lineWidth=1.5;
+    cx.beginPath();cx.arc(lx,m.y,sz*pulse*1.9,0,Math.PI*2);cx.stroke();
+    cx.strokeStyle=color+'88'; cx.lineWidth=2;
+    cx.beginPath();cx.arc(lx,m.y,sz*pulse*1.45,0,Math.PI*2);cx.stroke();
+    // 8-point star
+    cx.fillStyle=color;
+    cx.beginPath();
+    for(let s=0;s<8;s++){
+      const a=(s/8)*Math.PI*2+m.wobble*0.25;
+      const r=s%2===0?sz*pulse:sz*pulse*0.48;
+      s===0?cx.moveTo(lx+Math.cos(a)*r,m.y+Math.sin(a)*r)
+           :cx.lineTo(lx+Math.cos(a)*r,m.y+Math.sin(a)*r);
+    }
+    cx.closePath();cx.fill();
+    cx.fillStyle='#fff';
+    cx.beginPath();cx.arc(lx,m.y,sz*0.28,0,Math.PI*2);cx.fill();
+  }
+
+  cx.shadowBlur=0;
+
+  // Hit-window ring
+  if(m.windowOpen && m.st==='active'){
+    const pulse=0.55+Math.sin(Date.now()/90)*0.45;
+    cx.strokeStyle='#00ff88'; cx.lineWidth=2.5;
+    cx.globalAlpha=(cx.globalAlpha||1)*pulse;
+    cx.beginPath();cx.arc(lx,m.y,sz+16,0,Math.PI*2);cx.stroke();
+  }
+
+  // Reset alpha before gesture badge
+  cx.globalAlpha=m.st==='dead'?Math.max(0,m.deadTimer/0.45):1;
+
+  // Gesture prompt badge
+  const by=m.y-sz-18;
+  cx.fillStyle='rgba(0,0,0,0.72)';
+  cx.beginPath();cx.roundRect(lx-34,by-22,68,26,7);cx.fill();
+  cx.font='14px serif'; cx.textAlign='center';
+  cx.fillStyle=color;
+  cx.fillText(symbol+' '+label,lx,by-3);
+
+  cx.globalAlpha=1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   16. DRAW: HUD
+═══════════════════════════════════════════════════════════════════════ */
+function drawHUD(){
+  const p=18;
+
+  // Score panel
+  card(p,p,148,64,10,'rgba(0,0,0,0.55)','rgba(255,68,102,0.3)',1.5);
+  txt('SCORE',p+74,p+18,'10px sans-serif','rgba(255,255,255,0.5)');
+  txt(String(score),p+74,p+48,'bold 30px sans-serif','#ffffff');
+
+  // Lives panel
+  card(W/2-64,p,128,52,10,'rgba(0,0,0,0.55)','rgba(255,68,102,0.3)',1.5);
+  txt('LIVES',W/2,p+16,'10px sans-serif','rgba(255,255,255,0.5)');
+  for(let l=0;l<LIVES_MAX;l++){
+    cx.font='18px serif'; cx.textAlign='center';
+    cx.fillText(l<lives?'❤️':'🖤', W/2-22+l*22, p+40);
+  }
+
+  // Time panel
+  const tx=W-p-148;
+  card(tx,p,148,64,10,'rgba(0,0,0,0.55)','rgba(255,68,102,0.3)',1.5);
+  txt('TIME',tx+74,p+18,'10px sans-serif','rgba(255,255,255,0.5)');
+  const sec=Math.floor(gameTime);
+  txt(`${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}`,tx+74,p+48,'bold 26px sans-serif','#ffffff');
+
+  // Streak badge (only ≥2)
+  if(streak>=2){
+    const bc=streak>=5?'#ff7700':'#ffe04d';
+    cx.shadowColor=streak>=5?'#ff3300':'#cc9900'; cx.shadowBlur=14;
+    card(W/2-56,H-78,112,36,18,bc,null,0);
+    cx.shadowBlur=0;
+    txt(`🔥 ${streak} STREAK`,W/2,H-53,'bold 14px sans-serif','#000');
+  }
+
+  // Lane dots
+  for(let l=0;l<3;l++){
+    const lx=LANE_X[l]*W;
+    cx.fillStyle=l===playerLane?'rgba(255,68,102,0.6)':'rgba(255,255,255,0.15)';
+    cx.beginPath();cx.roundRect(lx-14,H-28,28,10,5);cx.fill();
+  }
+
+  // Gesture echo at top-center
+  if(gestureFlash){
+    const age=Date.now()-gestureFlash.t;
+    if(age<500){
+      const icons={fist:'✊',palm:'✋',swipeLeft:'👈',swipeRight:'👉',twohands:'✌️'};
+      cx.globalAlpha=1-age/500;
+      cx.font='38px serif'; cx.textAlign='center';
+      cx.fillText(icons[gestureFlash.name]||'',W/2,H*0.11);
+      cx.globalAlpha=1;
+    }
+  }
+
+  // Active gesture label
+  if(handCount>0){
+    const activePrimary=smoothedHands[0]||smoothedHands[1];
+    if(activePrimary){
+      let label='';
+      if(activeGestures.has('twohands')) label='✌️ SPECIAL';
+      else if(activeGestures.has('fist')) label='✊ BLOCK';
+      else if(activeGestures.has('palm')) label='✋ DODGE';
+      else if(activeGestures.has('swipeLeft'))  label='👈 LEFT';
+      else if(activeGestures.has('swipeRight')) label='👉 RIGHT';
+      if(label){
+        cx.fillStyle='rgba(0,0,0,0.5)';
+        cx.beginPath();cx.roundRect(p,H-56,120,30,8);cx.fill();
+        txt(label,p+60,H-34,'12px sans-serif','rgba(255,255,255,0.8)');
+      }
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   17. DRAW: SCREENS
+═══════════════════════════════════════════════════════════════════════ */
+function drawMenu(){
+  drawBackground();
+  drawParts();
+
+  // Title
+  cx.shadowColor='#ff4466'; cx.shadowBlur=40;
+  txt('⚔ MONSTER DODGE',W/2,H*0.19,'bold 52px sans-serif','#ffffff');
+  cx.shadowBlur=0;
+  txt('HAND GESTURE EDITION',W/2,H*0.26,'18px sans-serif','#ff4466');
+
+  // Gesture guide
+  const guides=[
+    {icon:'✊',name:'FIST',   desc:'Block strong monsters', color:'#ff4444'},
+    {icon:'✋',name:'PALM',   desc:'Dodge high monsters',   color:'#4dc8ff'},
+    {icon:'👈👉',name:'SWIPE',desc:'Move lanes fast',       color:'#ffe04d'},
+    {icon:'✌️',name:'BOTH HANDS',desc:'Special power move',  color:'#cc88ff'},
+  ];
+  const cw=Math.min(176,W*0.185);
+  const gap=10;
+  const total=guides.length*(cw+gap)-gap;
+  const sx=W/2-total/2;
+  guides.forEach((g,i)=>{
+    const gx=sx+i*(cw+gap), gy=H*0.36;
+    card(gx,gy,cw,108,12,'rgba(255,255,255,0.04)',g.color+'55',1.5);
+    txt(g.icon,gx+cw/2,gy+44,'30px serif',g.color);
+    txt(g.name,gx+cw/2,gy+66,'bold 12px sans-serif','#ffffff');
+    txt(g.desc,gx+cw/2,gy+84,'10px sans-serif','rgba(255,255,255,0.55)');
+  });
+
+  // Start button (dwell)
+  const bw=228,bh=56,bx=W/2-114,by=H*0.68;
+  const hov=dwellId==='start';
+  const prog=hov?Math.min((Date.now()-dwellT)/DWELL,1):0;
+  card(bx,by,bw,bh,28,hov?'#ff4466':'#220015','#ff4466',2);
+  txt('▶  START GAME',W/2,by+37,'bold 22px sans-serif','#ffffff');
+  if(prog>0){
+    cx.fillStyle='rgba(255,255,255,0.3)';
+    cx.beginPath();cx.roundRect(bx+5,by+bh-9,(bw-10)*prog,6,3);cx.fill();
+  }
+  btns=[{id:'start',x:bx,y:by,w:bw,h:bh}];
+
+  if(!handCount)
+    txt('☝  Show your hands to begin',W/2,H*0.88,'15px sans-serif','rgba(255,255,255,0.45)');
+
+  drawDwellCursor();
+}
+
+function drawCalibrate(){
+  drawBackground();
+  const prog=Math.max(0,1-calibTimer/(CALIB_DUR/1000));
+  txt('CALIBRATING…',W/2,H*0.3,'bold 36px sans-serif','#ffe04d');
+  txt('Hold hands relaxed in frame',W/2,H*0.40,'17px sans-serif','rgba(255,255,255,0.65)');
+  const bw=300,bh=12,bx=W/2-150,by=H*0.50;
+  card(bx,by,bw,bh,6,'rgba(255,255,255,0.1)',null,0);
+  cx.fillStyle='#ffe04d';
+  cx.beginPath();cx.roundRect(bx,by,bw*prog,bh,6);cx.fill();
+  txt(`${Math.ceil(calibTimer)}`,W/2,H*0.62,'bold 40px sans-serif','#ffffff');
+  txt(handCount>0?'✅ Hands detected':'⚠ Show hands to camera',
+    W/2,H*0.72,'15px sans-serif',handCount>0?'#00ff88':'#ff8800');
+}
+
+function drawCountdown(){
+  drawBackground();
+  const n=Math.max(0,Math.ceil(countdownTimer)-1);
+  const frac=countdownTimer-Math.floor(countdownTimer);
+  cx.save();
+  cx.translate(W/2,H/2);
+  cx.scale(1+(1-frac)*0.4,1+(1-frac)*0.4);
+  cx.globalAlpha=Math.max(0,frac);
+  if(n>0){
+    cx.shadowColor='#ff4466'; cx.shadowBlur=50;
+    txt(String(n),0,40,'bold 120px sans-serif','#ffffff');
+  } else {
+    cx.shadowColor='#00ff88'; cx.shadowBlur=50;
+    txt('GO!',0,44,'bold 88px sans-serif','#00ff88');
+  }
+  cx.restore();
+  cx.shadowBlur=0; cx.globalAlpha=1;
+}
+
+function drawGamePlay(){
+  drawBackground();
+
+  // Screen flash overlay
+  if(screenFlash){
+    const age=Date.now()-screenFlash.t;
+    if(age<280){
+      cx.fillStyle=screenFlash.color;
+      cx.globalAlpha=screenFlash.alpha*(1-age/280);
+      cx.fillRect(0,0,W,H);
+      cx.globalAlpha=1;
+    }
+  }
+
+  // Monsters behind player
+  for(const m of monsters){
+    if(m.y<H*PLAYER_Y_F) drawMonster(m);
+  }
+
+  drawPlayer();
+
+  // Monsters in front of player
+  for(const m of monsters){
+    if(m.y>=H*PLAYER_Y_F) drawMonster(m);
+  }
+
+  drawParts();
+  drawHUD();
+}
+
+function drawResults(){
+  drawBackground();
+  drawParts();
+  cx.fillStyle='rgba(0,0,0,0.62)';
+  cx.fillRect(0,0,W,H);
+
+  cx.shadowColor='#ff4466'; cx.shadowBlur=30;
+  txt('GAME OVER',W/2,H*0.20,'bold 54px sans-serif','#ff4466');
+  cx.shadowBlur=0;
+
+  // Stats card
+  const pw=Math.min(440,W*0.86),ph=188;
+  const px=W/2-pw/2,py=H*0.28;
+  card(px,py,pw,ph,16,'rgba(15,0,35,0.92)','rgba(255,68,102,0.45)',1.5);
+
+  const best=getBestScore();
+  const isNew=score>=best&&score>0;
+
+  txt('YOUR SCORE',W/2-pw*0.24,py+36,'11px sans-serif','rgba(255,255,255,0.5)');
+  txt(String(score),W/2-pw*0.24,py+76,'bold 44px sans-serif',isNew?'#ffe04d':'#ffffff');
+  if(isNew) txt('🏆 NEW BEST!',W/2-pw*0.24,py+98,'11px sans-serif','#ffe04d');
+
+  txt('BEST',W/2+pw*0.24,py+36,'11px sans-serif','rgba(255,255,255,0.5)');
+  txt(String(best),W/2+pw*0.24,py+76,'bold 44px sans-serif','#4dc8ff');
+
+  const sec=Math.floor(gameTime);
+  const timeStr=`${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}`;
+  txt('⏱ TIME  '+timeStr,  px+pw*0.25,py+140,'14px sans-serif','rgba(255,255,255,0.7)','center');
+  txt('🔥 BEST STREAK  '+maxStreak, px+pw*0.75,py+140,'14px sans-serif','rgba(255,255,255,0.7)','center');
+
+  txt(`Best time: ${Math.floor(getBestTime()/60)}:${String(getBestTime()%60).padStart(2,'0')}`,
+    W/2,py+168,'11px sans-serif','rgba(255,255,255,0.35)');
+
+  // Play again (dwell)
+  const bw=228,bh=54,bx=W/2-114,by=H*0.70;
+  const hov=dwellId==='restart';
+  const prog=hov?Math.min((Date.now()-dwellT)/DWELL,1):0;
+  card(bx,by,bw,bh,28,hov?'#ff4466':'#220015','#ff4466',2);
+  txt('▶  PLAY AGAIN',W/2,by+36,'bold 20px sans-serif','#ffffff');
+  if(prog>0){
+    cx.fillStyle='rgba(255,255,255,0.3)';
+    cx.beginPath();cx.roundRect(bx+5,by+bh-9,(bw-10)*prog,6,3);cx.fill();
+  }
+  btns=[{id:'restart',x:bx,y:by,w:bw,h:bh}];
+  drawDwellCursor();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   18. DWELL NAVIGATION  (gesture-driven menu selection)
+═══════════════════════════════════════════════════════════════════════ */
+let btns    = [];
+let dwellId = null, dwellT = 0;
+let handSX  = -1, handSY = -1;   // hand screen position
+
+function updateHandScreen(){
+  const lm=smoothedHands[0]||smoothedHands[1];
+  if(!lm||!handCount){ handSX=-1; handSY=-1; return; }
+  handSX=(1-lm[0].x)*W;
+  handSY=lm[0].y*H;
+}
+
+function hovBtn(){
+  if(handSX<0||!handCount) return null;
+  for(const b of btns){
+    if(handSX>=b.x&&handSX<=b.x+b.w&&handSY>=b.y&&handSY<=b.y+b.h) return b.id;
+  }
+  return null;
+}
+
+function handleActivate(id){
+  getAC();
+  beep(800,0.1,'sine',0.3);
+  if(id==='start'||id==='restart'){ startCalibration(); btns=[]; }
+}
+
+function drawDwellCursor(){
+  if(handSX<0||!handCount) return;
+  const prog=dwellId?Math.min((Date.now()-dwellT)/DWELL,1):0;
+  cx.shadowColor='#00ff88'; cx.shadowBlur=10;
+  cx.strokeStyle='#00ff88'; cx.lineWidth=3;
+  if(prog>0){
+    cx.beginPath();
+    cx.arc(handSX,handSY,22,-Math.PI/2,-Math.PI/2+prog*Math.PI*2);
+    cx.stroke();
+  } else {
+    cx.globalAlpha=0.45;
+    cx.beginPath();cx.arc(handSX,handSY,17,0,Math.PI*2);cx.stroke();
+    cx.globalAlpha=1;
+  }
+  cx.shadowBlur=0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   19. MAIN LOOP
+═══════════════════════════════════════════════════════════════════════ */
+let lastT=0;
+
+function loop(ts){
+  const dt=Math.min((ts-lastT)/1000,0.1); lastT=ts;
+
+  updateHandScreen();
+
+  // Dwell (menu states only)
+  if(gs==='menu'||gs==='results'){
+    const h=hovBtn();
+    if(h&&handCount>0){
+      if(h!==dwellId){ dwellId=h; dwellT=Date.now(); }
+      else if(Date.now()-dwellT>=DWELL){ handleActivate(dwellId); dwellId=null; }
+    } else dwellId=null;
+  }
+
+  // State machine ticks
+  if(gs==='calibrate'){
+    calibTimer-=dt;
+    if(calibTimer<=0){
+      if(calibSamples.length>5){
+        calibBaseline={
+          wx:calibSamples.reduce((s,p)=>s+p.x,0)/calibSamples.length,
+          wy:calibSamples.reduce((s,p)=>s+p.y,0)/calibSamples.length,
+        };
+      }
+      startCountdown();
+    }
+  }
+
+  if(gs==='countdown'){
+    countdownTimer-=dt;
+    const nv=Math.max(0,Math.ceil(countdownTimer)-1);
+    if(nv!==countdownVal&&nv>=0){ countdownVal=nv; sfxCountdown(); }
+    if(countdownTimer<=0){ sfxGo(); startPlay(); }
+  }
+
+  if(gs==='play'){
+    gameTime+=dt;
+    updateMonsters(dt);
+    tickParts();
+  }
+
+  // Render
+  cx.clearRect(0,0,W,H);
+  if(gs==='menu')      drawMenu();
+  if(gs==='calibrate') drawCalibrate();
+  if(gs==='countdown') drawCountdown();
+  if(gs==='play')      drawGamePlay();
+  if(gs==='results')   drawResults();
+
+  requestAnimationFrame(loop);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   20. BOOT
+═══════════════════════════════════════════════════════════════════════ */
+requestAnimationFrame(t=>{ lastT=t; loop(t); });
+waitForMP(setupMediaPipe);
+
+window.addEventListener('beforeunload',()=>{
+  try{ if(mpCam) mpCam.stop(); }catch(e){}
+  try{ if(mpHands) mpHands.close(); }catch(e){}
+});
+</script>
+</body>
+</html>

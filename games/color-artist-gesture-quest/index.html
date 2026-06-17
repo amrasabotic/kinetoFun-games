@@ -1,0 +1,1954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Color Artist: Gesture Quest</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0e0e1a;font-family:system-ui,-apple-system,sans-serif;color:#fff}
+
+/* ── Loading ─────────────────────────────── */
+#loading{position:fixed;inset:0;background:#0e0e1a;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;gap:20px}
+#loading h1{font-size:36px;font-weight:800;background:linear-gradient(135deg,#6C63FF,#FF6B6B);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.spinner{width:48px;height:48px;border:4px solid #2a2a4a;border-top-color:#6C63FF;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#load-status{color:#888;font-size:14px}
+
+/* ── Game root ───────────────────────────── */
+#game{position:fixed;inset:0;display:none;flex-direction:column}
+
+/* ── HUD ─────────────────────────────────── */
+#hud{display:flex;align-items:center;gap:20px;padding:8px 18px;background:rgba(0,0,0,.65);border-bottom:1px solid #2a2a4a;font-size:13px;flex-shrink:0;z-index:10}
+#hud .world-name{font-weight:700}
+#hud .lv-name{color:#ccc}
+#hud .timer{font-variant-numeric:tabular-nums;transition:color .3s}
+#hud .timer.urgent{color:#f55;animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+#hud .spacer{flex:1}
+#hud .xp{color:#aaa}
+
+/* ── Canvas area ─────────────────────────── */
+#canvas-area{flex:1;position:relative;overflow:hidden}
+#canvas-area canvas{position:absolute;top:0;left:0;width:100%;height:100%}
+#bg-canvas{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%)}
+
+/* ── Sidebar ─────────────────────────────── */
+#sidebar{position:absolute;right:0;top:0;bottom:0;width:128px;background:rgba(8,8,18,.88);border-left:1px solid #2a2a4a;padding:10px 8px;display:flex;flex-direction:column;gap:7px;overflow-y:auto;z-index:5}
+.panel{background:#1a1a2e;border-radius:10px;padding:8px;font-size:11px}
+.panel-label{color:#666;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;font-size:10px}
+#gesture-display{text-align:center}
+#gesture-icon{font-size:26px;line-height:1}
+#gesture-name{color:#555;font-size:10px;margin-top:2px}
+#color-preview{display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center}
+#color-dot{width:34px;height:34px;border-radius:50%;border:2.5px solid #fff;margin:0 auto;transition:background .2s}
+.sb-btn{background:#0e0e1a;color:#ccc;border:1px solid #333;border-radius:7px;padding:5px 8px;font-size:11px;cursor:default;text-align:left;width:100%;margin-bottom:3px;transition:border-color .15s,background .15s;position:relative;overflow:hidden}
+.sb-btn:hover,.sb-btn.active{border-color:#6C63FF;background:#1a1a30;color:#fff}
+#action-btns{display:flex;flex-direction:column;gap:5px;margin-top:auto}
+.action-btn{background:#1a1a2e;color:#aaa;border:1px solid #2a2a4a;border-radius:8px;padding:7px;font-size:12px;cursor:default;text-align:center;width:100%;position:relative;overflow:hidden}
+.action-btn:hover{background:#2a2a3e;color:#fff}
+/* Gesture sidebar focus state */
+.sb-focused{border-color:#6C63FF!important;background:#1a1a30!important;color:#fff!important}
+.action-btn.sb-focused{background:#2a1a4a!important;border-color:#6C63FF!important;color:#fff!important}
+/* Hold-progress underline bar */
+.sb-focused::after{content:'';position:absolute;bottom:0;left:0;height:2px;background:linear-gradient(90deg,#6C63FF,#9B59B6);border-radius:2px;width:calc(var(--hp,0)*100%);transition:width .04s linear}
+/* Sidebar zone entry hint (left edge glow) */
+#sb-zone-edge{position:absolute;left:0;top:0;bottom:0;width:2px;background:linear-gradient(180deg,transparent,rgba(108,99,255,.5),transparent);pointer-events:none;opacity:0;transition:opacity .3s;z-index:6}
+#sb-zone-edge.active{opacity:1}
+
+/* ── Camera preview ──────────────────────── */
+#cam-preview{position:absolute;bottom:14px;left:14px;width:140px;height:100px;border-radius:10px;overflow:hidden;border:2px solid #2a2a4a;z-index:5;background:#000}
+#cam-preview canvas{width:100%;height:100%;transform:scaleX(-1)}
+
+/* ── Hint bar ────────────────────────────── */
+#hint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.72);color:#bbb;font-size:12px;border-radius:8px;padding:6px 16px;z-index:5;pointer-events:none;text-align:center;max-width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ── Color wheel overlay ─────────────────── */
+#wheel-overlay{position:absolute;inset:0;pointer-events:none;z-index:8}
+
+/* ── Screens (menus) ─────────────────────── */
+.screen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:20;background:rgba(8,8,18,.95);backdrop-filter:blur(6px)}
+.screen.active{display:flex}
+.card{background:#16162a;border-radius:20px;padding:36px 44px;text-align:center;border:1px solid #2a2a4a;max-width:440px;width:90%}
+.card h1{font-size:40px;font-weight:800;margin-bottom:4px}
+.card .tagline{color:#6C63FF;font-size:18px;font-weight:700;margin-bottom:8px}
+.card .sub{color:#888;font-size:13px;margin-bottom:28px;line-height:1.6}
+.btn-primary{background:linear-gradient(135deg,#6C63FF,#9B59B6);color:#fff;border:none;border-radius:13px;padding:14px 28px;font-size:16px;font-weight:700;cursor:pointer;width:100%;margin-bottom:10px;transition:opacity .15s}
+.btn-primary:hover{opacity:.88}
+.btn-secondary{background:#1e1e2e;color:#ccc;border:1px solid #3a3a5a;border-radius:10px;padding:10px 20px;font-size:14px;cursor:pointer;margin-top:6px}
+.btn-secondary:hover{background:#2a2a3e}
+.meta{color:#666;font-size:12px;margin-top:14px}
+.gesture-guide{display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:left;margin:16px 0}
+.gg-item{background:#1a1a2e;border-radius:8px;padding:8px 12px;font-size:12px}
+.gg-item span:first-child{font-size:18px;margin-right:6px}
+
+/* World select */
+#world-screen .card{max-width:680px}
+.world-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px}
+.world-card{background:#1a1a2e;border:2px solid transparent;border-radius:16px;padding:18px 14px;cursor:pointer;text-align:center;transition:transform .1s,opacity .15s}
+.world-card:hover:not(.locked){transform:scale(1.03)}
+.world-card.locked{opacity:.42;cursor:not-allowed}
+.world-emoji{font-size:34px;display:block;margin-bottom:6px}
+.world-title{font-weight:700;font-size:15px;margin-bottom:4px}
+.world-desc{color:#888;font-size:11px}
+.world-req{color:#f90;font-size:11px;margin-top:4px}
+
+/* Level select */
+#level-screen .card{max-width:560px}
+.level-list{display:flex;flex-direction:column;gap:10px;margin:16px 0}
+.level-card{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:13px;padding:13px 18px;cursor:pointer;text-align:left;transition:border-color .15s}
+.level-card:hover{border-color:#6C63FF}
+.level-row{display:flex;justify-content:space-between;align-items:center}
+.level-title{font-weight:600;font-size:14px}
+.level-stars span{font-size:16px}
+.level-desc{color:#888;font-size:11px;margin-top:3px}
+.level-time{color:#555;font-size:10px;margin-top:2px}
+
+/* Pause screen */
+#pause-screen .card{max-width:360px}
+
+/* Level complete */
+#complete-screen .card{max-width:460px}
+#complete-stars{font-size:44px;margin:12px 0;letter-spacing:4px}
+#complete-score{color:#aaa;font-size:13px;margin-bottom:6px}
+.xp-badge{background:linear-gradient(135deg,#f90,#f50);color:#fff;border-radius:8px;padding:6px 14px;font-weight:700;font-size:15px;display:inline-block;margin:8px 0}
+.unlock-item{background:#2a2a3a;border-radius:8px;padding:8px 14px;margin-top:8px;color:#FFD700;font-size:13px;text-align:left}
+.complete-btns{display:flex;gap:10px;justify-content:center;margin-top:20px;flex-wrap:wrap}
+.complete-btns button{flex:1;min-width:100px}
+
+/* ── TV / gesture-only mode ──────────────────────────────── */
+/* No mouse interaction on menu overlays */
+.screen{pointer-events:none!important}
+/* Remove hover cursor from menu elements */
+.world-card,.level-card,.btn-primary,.btn-secondary{cursor:default!important}
+.world-card:hover:not(.gu-focused){transform:none!important}
+.btn-primary:hover{opacity:1!important}
+.btn-secondary:hover{background:#1e1e2e!important}
+.level-card:hover:not(.gu-focused){border-color:#2a2a4a!important}
+
+/* Gesture focus indicator — TV-style highlight */
+.gu-focused{
+  border-color:#6C63FF!important;
+  box-shadow:0 0 0 3px rgba(108,99,255,0.55),0 0 24px rgba(108,99,255,0.25)!important;
+  transform:scale(1.05)!important;
+  transition:box-shadow .15s,transform .15s,border-color .1s!important;
+  outline:none;
+}
+button.gu-focused{background:linear-gradient(135deg,#3a30b0,#6a3090)!important}
+
+/* Gesture cursor (visible on menu screens only) */
+#gesture-cursor{
+  position:fixed;width:32px;height:32px;
+  border:2.5px solid rgba(255,255,255,0.85);
+  border-radius:50%;pointer-events:none;z-index:9999;
+  transform:translate(-50%,-50%);display:none;
+  transition:border-color .1s;
+  background:transparent;
+}
+#gesture-cursor.draw-active{
+  border-color:#6C63FF;
+  box-shadow:0 0 14px rgba(108,99,255,0.7);
+}
+/* Hold-progress ring drawn via SVG overlay */
+#gesture-cursor svg{position:absolute;inset:-6px;width:44px;height:44px}
+#gu-hold-arc{
+  fill:none;stroke:#6C63FF;stroke-width:3;
+  stroke-dasharray:0 125.6;stroke-linecap:round;
+  transform-origin:22px 22px;transform:rotate(-90deg);
+  transition:stroke-dasharray .05s linear;
+}
+
+/* Gesture nav hint bar */
+#gu-nav-hint{
+  position:fixed;bottom:18px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,.78);color:#aaa;font-size:12px;
+  border-radius:20px;padding:7px 20px;z-index:9999;
+  pointer-events:none;display:none;gap:18px;align-items:center;
+  white-space:nowrap;
+}
+#gu-nav-hint.visible{display:flex}
+#gu-nav-hint span{opacity:.7}
+#gu-nav-hint em{color:#fff;font-style:normal;font-weight:600}
+
+/* Score bars */
+.score-bars{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0;text-align:left}
+.score-bar-row{font-size:11px}
+.score-bar-label{color:#888;margin-bottom:3px}
+.score-bar-track{background:#2a2a3a;border-radius:4px;height:6px;overflow:hidden}
+.score-bar-fill{height:100%;border-radius:4px;transition:width .6s ease}
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <h1>🎨 Color Artist</h1>
+  <div class="spinner"></div>
+  <div id="load-status">Loading MediaPipe…</div>
+</div>
+
+<!-- Hidden webcam -->
+<video id="webcam" playsinline muted style="display:none;position:absolute"></video>
+
+<!-- Game container -->
+<div id="game">
+  <div id="hud">
+    <span class="world-name" id="hud-world"></span>
+    <span class="lv-name" id="hud-level"></span>
+    <span class="spacer"></span>
+    <span class="timer" id="hud-timer">⏱ 0:00</span>
+    <span>⭐ <span id="hud-stars">0</span></span>
+    <span class="xp">XP <span id="hud-xp">0</span></span>
+  </div>
+
+  <div id="canvas-area">
+    <canvas id="bg-canvas"></canvas>
+    <canvas id="stroke-canvas"></canvas>
+    <canvas id="cursor-canvas"></canvas>
+    <canvas id="wheel-canvas"></canvas>
+
+    <div id="cam-preview"><canvas id="cam-canvas"></canvas></div>
+
+    <div id="sidebar">
+      <div id="sb-zone-edge"></div>
+      <div class="panel" id="gesture-display">
+        <div class="panel-label">Gesture</div>
+        <div id="gesture-icon">✋</div>
+        <div id="gesture-name">OPEN_PALM</div>
+      </div>
+
+      <div class="panel" id="color-preview">
+        <div class="panel-label">Color</div>
+        <div id="color-dot" style="background:#FF6B6B"></div>
+        <div style="color:#555;font-size:10px;margin-top:3px">PINCH → wheel</div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-label">Brush</div>
+        <div id="brush-btns"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-label">Size ✌️</div>
+        <div id="size-btns"></div>
+      </div>
+
+      <div id="action-btns">
+        <button class="action-btn" id="btn-undo">↩ Undo</button>
+        <button class="action-btn" id="btn-clear">🗑 Clear</button>
+        <button class="action-btn" id="btn-done">✅ Done</button>
+      </div>
+    </div>
+
+    <div id="hint"></div>
+  </div>
+</div>
+
+<!-- Gesture cursor — visible on menu screens -->
+<div id="gesture-cursor">
+  <svg viewBox="0 0 44 44">
+    <circle cx="22" cy="22" r="20" id="gu-hold-arc"/>
+  </svg>
+</div>
+
+<!-- Gesture nav hint -->
+<div id="gu-nav-hint">
+  <span>👋 Point at an item to <em>select</em> it</span>
+  <span>👆 Hold <em>DRAW</em> to confirm</span>
+  <span>✊ <em>FIST</em> to go back</span>
+</div>
+
+<!-- ── Screens ── -->
+<div class="screen active" id="menu-screen">
+  <div class="card">
+    <h1>🎨 Color Artist</h1>
+    <div class="tagline">Gesture Quest</div>
+    <div class="sub">
+      Paint freely with your hand.<br>
+      No mouse. No keyboard. Just gestures.
+    </div>
+    <div class="gesture-guide">
+      <div class="gg-item"><span>✋</span> Move brush</div>
+      <div class="gg-item"><span>👆</span> Draw stroke</div>
+      <div class="gg-item"><span>🤏</span> Color wheel</div>
+      <div class="gg-item"><span>✌️</span> Brush size</div>
+      <div class="gg-item"><span>✊</span> Pause game</div>
+      <div class="gg-item"><span>👁</span> Hold steady</div>
+    </div>
+    <button class="btn-primary" id="btn-play">✋ Start Playing</button>
+    <div class="meta" id="menu-meta">XP: 0 &nbsp;•&nbsp; ⭐ 0 stars</div>
+  </div>
+</div>
+
+<div class="screen" id="world-screen">
+  <div class="card">
+    <h2 style="margin-bottom:20px">Choose a World</h2>
+    <div class="world-grid" id="world-grid"></div>
+    <button class="btn-secondary" id="btn-back-menu">← Menu</button>
+  </div>
+</div>
+
+<div class="screen" id="level-screen">
+  <div class="card">
+    <h2 id="level-screen-title" style="margin-bottom:4px"></h2>
+    <p id="level-screen-desc" style="color:#888;font-size:12px;margin-bottom:16px"></p>
+    <div class="level-list" id="level-list"></div>
+    <button class="btn-secondary" id="btn-back-worlds">← Worlds</button>
+  </div>
+</div>
+
+<div class="screen" id="pause-screen">
+  <div class="card">
+    <h2 style="font-size:28px">✊ Paused</h2>
+    <p style="color:#888;margin:12px 0 24px">Open palm or fist again to resume</p>
+    <button class="btn-primary" id="btn-resume">▶ Resume</button>
+    <button class="btn-secondary" id="btn-quit-pause">← Levels</button>
+  </div>
+</div>
+
+<div class="screen" id="complete-screen">
+  <div class="card">
+    <h2 id="complete-title" style="font-size:26px;color:#FFD700"></h2>
+    <div id="complete-stars"></div>
+    <div class="score-bars" id="score-bars"></div>
+    <div id="complete-score"></div>
+    <div id="xp-badge-wrap"></div>
+    <div id="unlock-list"></div>
+    <div class="complete-btns">
+      <button class="btn-secondary" id="btn-retry">🔄 Retry</button>
+      <button class="btn-primary"   id="btn-next">Next Level →</button>
+      <button class="btn-secondary" id="btn-to-levels">Levels</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  SECTION 1 — PROGRESS MANAGER
+// ═══════════════════════════════════════════════════════════
+const ProgressManager = (() => {
+  const KEY = 'color_artist_quest_v1';
+  const DEFAULTS = {
+    xp: 0, unlockedBrushes: [], unlockedColors: [],
+    completedLevels: {}, totalStars: 0, lastPlayed: 0,
+    settings: { showGuides: true, mirrorCamera: true }
+  };
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (!raw) return { ...DEFAULTS, lastPlayed: Date.now() };
+      const p = JSON.parse(raw);
+      return { ...DEFAULTS, ...p, settings: { ...DEFAULTS.settings, ...(p.settings || {}) } };
+    } catch { return { ...DEFAULTS, lastPlayed: Date.now() }; }
+  }
+
+  function save(p) {
+    try { p.lastPlayed = Date.now(); localStorage.setItem(KEY, JSON.stringify(p)); }
+    catch (e) { console.warn('[Progress] save failed', e); }
+  }
+
+  function getLevelStars(wId, lId) { return load().completedLevels[`${wId}-${lId}`] || 0; }
+
+  function recordLevel(wId, lId, stars, xpGained) {
+    const p = load();
+    const k = `${wId}-${lId}`;
+    if (stars > (p.completedLevels[k] || 0)) p.completedLevels[k] = stars;
+    p.xp += xpGained;
+    p.totalStars = Object.values(p.completedLevels).reduce((s, v) => s + v, 0);
+    save(p);
+    return p;
+  }
+
+  function addBrush(b) {
+    const p = load();
+    if (!p.unlockedBrushes.includes(b)) { p.unlockedBrushes.push(b); save(p); }
+  }
+
+  function addColors(cs) {
+    const p = load();
+    cs.forEach(c => { if (!p.unlockedColors.includes(c)) p.unlockedColors.push(c); });
+    save(p);
+  }
+
+  return { load, save, getLevelStars, recordLevel, addBrush, addColors };
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+//  SECTION 2 — WORLD / LEVEL DATA
+// ═══════════════════════════════════════════════════════════
+const WORLDS = [
+  {
+    id:0, name:'Shape Academy', emoji:'📐',
+    desc:'Master the fundamentals of geometric form',
+    color:'#6C63FF', xpReq:0,
+    brushUnlock:'smooth',
+    colorUnlocks:['#FF6B6B','#4ECDC4','#45B7D1','#FFA07A'],
+    levels:[
+      { id:0, name:'Circle of Life',   desc:'Draw a smooth circle inside the guide',
+        target:{ type:'trace', shapes:[{t:'circle',x:.5,y:.5,sz:.28}] },
+        time:60,  stars:[50,70,88], hint:'DRAW gesture • trace the dotted ring' },
+      { id:1, name:'Triangle Trick',   desc:'Follow the triangular guide precisely',
+        target:{ type:'trace', shapes:[{t:'triangle',x:.5,y:.52,sz:.32}] },
+        time:60,  stars:[50,70,88], hint:'Keep index finger extended the whole time' },
+      { id:2, name:'Star Gazer',       desc:'Create a perfect 5-pointed star',
+        target:{ type:'trace', shapes:[{t:'star',x:.5,y:.5,sz:.32,pts:5}] },
+        time:90,  stars:[40,65,85], hint:'Lift & redraw for each point if needed' },
+    ]
+  },
+  {
+    id:1, name:'Nature Sketch', emoji:'🌿',
+    desc:'Capture the beauty of the natural world',
+    color:'#2ECC71', xpReq:200,
+    brushUnlock:'gradient',
+    colorUnlocks:['#27AE60','#8BC34A','#CDDC39','#795548','#A5D6A7'],
+    levels:[
+      { id:0, name:'Tall Oak Tree',   desc:'Sketch a tree — trunk and leafy canopy',
+        target:{ type:'freeform', shapes:[{t:'tree',x:.5,y:.56,sz:.4}], minColors:2 },
+        time:120, stars:[40,65,85], hint:'Brown trunk • green canopy • PINCH to swap color' },
+      { id:1, name:'Blooming Flower', desc:'Paint a vibrant flower in full bloom',
+        target:{ type:'freeform', shapes:[{t:'flower',x:.5,y:.5,sz:.34}], minColors:2 },
+        time:90,  stars:[40,65,85], hint:'Bold petal colors boost your score' },
+      { id:2, name:'Cloudy Sky',      desc:'Paint fluffy clouds in a blue sky',
+        target:{ type:'freeform', shapes:[{t:'cloud',x:.28,y:.28,sz:.22},{t:'cloud',x:.68,y:.22,sz:.19}], minColors:2 },
+        time:120, stars:[40,65,85], hint:'Blue sky behind • white fluffy clouds in front' },
+    ]
+  },
+  {
+    id:2, name:'City Builder', emoji:'🏙️',
+    desc:'Construct an urban masterpiece stroke by stroke',
+    color:'#3498DB', xpReq:500,
+    brushUnlock:'neon',
+    colorUnlocks:['#FF5722','#9C27B0','#607D8B','#F44336','#00BCD4'],
+    levels:[
+      { id:0, name:'My First House', desc:'Draw walls, roof, door and window',
+        target:{ type:'trace', shapes:[{t:'house',x:.5,y:.55,sz:.4}], minColors:2 },
+        time:90,  stars:[40,65,85], hint:'Square walls first • then triangular roof' },
+      { id:1, name:'Sports Car',     desc:'Sketch a sleek car with body and wheels',
+        target:{ type:'trace', shapes:[{t:'car',x:.5,y:.6,sz:.45}], minColors:2 },
+        time:90,  stars:[40,65,85], hint:'Body first • then wheels and windows' },
+      { id:2, name:'Night Skyline',  desc:'Build a city skyline under the stars',
+        target:{ type:'freeform', minColors:3 },
+        time:150, stars:[35,60,80], hint:'Dark palette for night • bright windows for life' },
+    ]
+  },
+  {
+    id:3, name:'Art Master Trials', emoji:'🎨',
+    desc:'Prove ultimate mastery of color and form',
+    color:'#9B59B6', xpReq:1000,
+    brushUnlock:'particle',
+    colorUnlocks:['#FF1493','#00FFFF','#FFD700','#7FFF00','#FF6347'],
+    levels:[
+      { id:0, name:'Rainbow Symphony', desc:'Use every color of the rainbow',
+        target:{ type:'color_match', minColors:6 },
+        time:120, stars:[40,65,85], hint:'PINCH for color wheel • use 6 distinct hues' },
+      { id:1, name:'Pattern Master',   desc:'Replicate the geometric circle pattern',
+        target:{ type:'pattern', shapes:[{t:'circle',x:.25,y:.25,sz:.14},{t:'circle',x:.75,y:.25,sz:.14},{t:'circle',x:.25,y:.75,sz:.14},{t:'circle',x:.75,y:.75,sz:.14},{t:'circle',x:.5,y:.5,sz:.18}], minColors:2 },
+        time:120, stars:[40,65,85], hint:'Corner circles first • then the center' },
+      { id:2, name:'Grand Masterpiece',desc:'Create your ultimate free artwork',
+        target:{ type:'freeform', minColors:5 },
+        time:180, stars:[30,55,75], hint:'No rules — express everything you have learned' },
+    ]
+  }
+];
+
+const BASE_COLORS = [
+  '#000000','#FFFFFF','#FF0000','#FF7F00','#FFFF00','#00CC00',
+  '#0000FF','#9B59B6','#FF1493','#00FFFF','#FF6B6B','#4ECDC4',
+  '#45B7D1','#FFA07A','#2ECC71','#E74C3C','#F39C12','#795548'
+];
+
+const BRUSH_SIZES = { XS:4, S:8, M:14, L:22, XL:34 };
+
+
+// ═══════════════════════════════════════════════════════════
+//  SECTION 3 — HAND TRACKER  (Layer 1 — raw landmarks only)
+// ═══════════════════════════════════════════════════════════
+class HandTracker {
+  constructor(videoEl, onFrame) {
+    this._video = videoEl;
+    this._onFrame = onFrame;
+    this._hands = null;
+    this._camera = null;
+    this._running = false;
+  }
+
+  async start() {
+    if (this._running) return;
+
+    this._hands = new Hands({
+      locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+    });
+    this._hands.setOptions({
+      maxNumHands: 1, modelComplexity: 1,
+      minDetectionConfidence: 0.7, minTrackingConfidence: 0.5
+    });
+    this._hands.onResults(r => this._handleResults(r));
+
+    this._camera = new Camera(this._video, {
+      onFrame: async () => {
+        if (this._hands) await this._hands.send({ image: this._video });
+      },
+      width: 640, height: 480
+    });
+
+    this._camera.start();
+    this._running = true;
+  }
+
+  stop() {
+    if (this._camera) this._camera.stop();
+    if (this._hands)  this._hands.close();
+    this._camera = null; this._hands = null; this._running = false;
+  }
+
+  _handleResults(r) {
+    if (!r.multiHandLandmarks || !r.multiHandLandmarks.length) {
+      this._onFrame(null); return;
+    }
+    this._onFrame({
+      timestamp: performance.now(),
+      landmarks: r.multiHandLandmarks[0],
+      handedness: (r.multiHandedness && r.multiHandedness[0] && r.multiHandedness[0].label) || 'Right'
+    });
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  SECTION 4 — GESTURE ENGINE  (Layer 2 — stability system)
+// ═══════════════════════════════════════════════════════════
+class GestureEngine {
+  constructor() {
+    this._history    = [];
+    this._committed  = 'OPEN_PALM';
+    this._candidate  = 'OPEN_PALM';
+    this._candidateSince = 0;
+    this.cursorX     = 0.5;
+    this.cursorY     = 0.5;
+    this.confidence  = 0;
+    this.isStable    = false;
+  }
+
+  // ── Public ────────────────────────────────────────────────
+  process(frame) {
+    if (!frame) return this._buildState('OPEN_PALM', 0, false);
+
+    const raw = this._classify(frame.landmarks);
+    this._pushHistory(raw);
+
+    const { winner, conf } = this._vote();
+    this.confidence = conf;
+    const stable = this._debounce(winner, performance.now());
+    this._smooth(frame.landmarks);
+
+    this.isStable = (stable === this._committed);
+    return this._buildState(stable, conf, this.isStable);
+  }
+
+  reset() {
+    this._history = []; this._committed = 'OPEN_PALM';
+    this._candidate = 'OPEN_PALM'; this.cursorX = 0.5; this.cursorY = 0.5;
+  }
+
+  // ── Raw classification ────────────────────────────────────
+  _classify(lm) {
+    // Pinch — geometric distance / hand size
+    const hs = Math.hypot(lm[9].x-lm[0].x, lm[9].y-lm[0].y, lm[9].z-lm[0].z);
+    const pd = Math.hypot(lm[4].x-lm[8].x, lm[4].y-lm[8].y, lm[4].z-lm[8].z);
+    if (hs > 0.01 && pd/hs < 0.38) return 'PINCH';
+
+    // Finger extension: tip.y < pip.y = pointing up
+    const idx = lm[8].y  < lm[6].y;
+    const mid = lm[12].y < lm[10].y;
+    const rng = lm[16].y < lm[14].y;
+    const pky = lm[20].y < lm[18].y;
+    const n   = [idx,mid,rng,pky].filter(Boolean).length;
+
+    if (n === 0)                         return 'FIST';
+    if (n === 4)                         return 'OPEN_PALM';
+    if (idx && !mid && !rng && !pky)     return 'DRAW';
+    if (idx &&  mid && !rng && !pky)     return 'PEACE';
+    return 'UNKNOWN';
+  }
+
+  // ── History buffer (10 frames) ────────────────────────────
+  _pushHistory(g) {
+    this._history.push(g);
+    if (this._history.length > 10) this._history.shift();
+  }
+
+  // ── Majority vote ≥ 70% ───────────────────────────────────
+  _vote() {
+    if (!this._history.length) return { winner:'OPEN_PALM', conf:0 };
+    const cnt = {};
+    for (const g of this._history) cnt[g] = (cnt[g]||0) + 1;
+    let winner='OPEN_PALM', max=0;
+    for (const [g,n] of Object.entries(cnt)) if (n>max) { max=n; winner=g; }
+    const conf = max / this._history.length;
+    if (conf < 0.70) return { winner:'OPEN_PALM', conf };
+    return { winner, conf };
+  }
+
+  // ── Debounce 300 ms ───────────────────────────────────────
+  _debounce(winner, now) {
+    if (winner !== this._candidate) { this._candidate=winner; this._candidateSince=now; }
+    if (now-this._candidateSince >= 300 && this._candidate !== this._committed) {
+      this._committed = this._candidate;
+    }
+    return this._committed;
+  }
+
+  // ── Cursor lerp 0.20 ─────────────────────────────────────
+  _smooth(lm) {
+    // Mirror X so right-hand movement feels natural
+    const rx = 1 - lm[8].x, ry = lm[8].y;
+    this.cursorX += (rx - this.cursorX) * 0.20;
+    this.cursorY += (ry - this.cursorY) * 0.20;
+  }
+
+  _buildState(g, conf, stable) {
+    return { gesture:g, confidence:conf, isStable:stable, cursorX:this.cursorX, cursorY:this.cursorY };
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  SECTION 5 — GAME ENGINE  (Layer 3 — pure logic)
+// ═══════════════════════════════════════════════════════════
+class GameEngine {
+  constructor() {
+    this.worldIdx  = 0;
+    this.levelIdx  = 0;
+    this._smth     = [];   // stroke smoothness samples
+    this._colors   = new Set();
+  }
+
+  startLevel(wId, lId) {
+    this.worldIdx = wId; this.levelIdx = lId;
+    this._smth = []; this._colors.clear();
+  }
+
+  updateStrokes(strokes) {
+    strokes.forEach(s => this._colors.add(s.color));
+  }
+
+  trackStroke(pts) {
+    if (pts.length > 3) this._smth.push(this._smoothness(pts));
+  }
+
+  // ── Scoring ───────────────────────────────────────────────
+  calcScore(strokes, timeLeft, timeLimit) {
+    const lv  = WORLDS[this.worldIdx].levels[this.levelIdx];
+    const acc = this._scoreAccuracy(strokes, lv);
+    const col = this._scoreColor(strokes, lv);
+    const tim = this._scoreTime(timeLeft, timeLimit);
+    const smt = this._scoreSmooth();
+    const total = Math.min(100, Math.round(acc+col+tim+smt));
+    return { accuracy:acc, colorUsage:col, timeBonus:tim, smoothness:smt, total };
+  }
+
+  _scoreAccuracy(strokes, lv) {
+    if (!strokes.length) return 0;
+    const pts = strokes.reduce((n,s) => n+s.points.length, 0);
+    const cov = Math.min(1, pts/600);
+    if (lv.target.type==='freeform'||lv.target.type==='color_match') return Math.round(cov*40);
+    const sc  = Math.min(1, strokes.length/8);
+    return Math.round((cov*.5+sc*.5)*40);
+  }
+
+  _scoreColor(strokes, lv) {
+    const u   = new Set(strokes.map(s=>s.color)).size;
+    const min = lv.target.minColors || 1;
+    return Math.round(Math.min(1, u/Math.max(1,min*1.2))*20);
+  }
+
+  _scoreTime(left, total) {
+    if (!total) return 20;
+    return Math.round(Math.max(0, left/total)*20);
+  }
+
+  _scoreSmooth() {
+    if (!this._smth.length) return 10;
+    const avg = this._smth.reduce((a,b)=>a+b,0)/this._smth.length;
+    return Math.round(Math.min(1,avg)*20);
+  }
+
+  _smoothness(pts) {
+    let dev=0;
+    for (let i=1;i<pts.length-1;i++) {
+      const ax=pts[i].x-pts[i-1].x, ay=pts[i].y-pts[i-1].y;
+      const bx=pts[i+1].x-pts[i].x, by=pts[i+1].y-pts[i].y;
+      const a=Math.abs(Math.atan2(by,bx)-Math.atan2(ay,ax));
+      dev+=Math.min(a, Math.PI*2-a);
+    }
+    return Math.max(0, 1-(dev/(pts.length-2))/Math.PI);
+  }
+
+  toStars(score, thresholds) {
+    if (score>=thresholds[2]) return 3;
+    if (score>=thresholds[1]) return 2;
+    if (score>=thresholds[0]) return 1;
+    return 0;
+  }
+
+  finalize(score) {
+    const lv     = WORLDS[this.worldIdx].levels[this.levelIdx];
+    const world  = WORLDS[this.worldIdx];
+    const stars  = this.toStars(score.total, lv.stars);
+    const xpG    = Math.round(score.total*2+stars*50);
+
+    const p = ProgressManager.recordLevel(this.worldIdx, this.levelIdx, stars, xpG);
+    const unlocks = [];
+
+    const allDone = world.levels.every((_,i) =>
+      (p.completedLevels[`${this.worldIdx}-${i}`]||0) > 0
+    );
+    if (allDone) {
+      if (world.brushUnlock && !p.unlockedBrushes.includes(world.brushUnlock)) {
+        ProgressManager.addBrush(world.brushUnlock);
+        unlocks.push({ name: `${capitalize(world.brushUnlock)} Brush`, desc:`Unlocked the ${world.brushUnlock} brush!` });
+      }
+      if (world.colorUnlocks && world.colorUnlocks.length) {
+        ProgressManager.addColors(world.colorUnlocks);
+        unlocks.push({ name:'New Color Palette', desc:`${world.colorUnlocks.length} new colors unlocked!` });
+      }
+    }
+
+    return { stars, xpGained:xpG, unlocks, progress:p };
+  }
+
+  getColors() {
+    const p = ProgressManager.load();
+    return [...new Set([...BASE_COLORS, ...p.unlockedColors])];
+  }
+
+  getBrushes() {
+    const p = ProgressManager.load();
+    return ['basic', ...p.unlockedBrushes];
+  }
+}
+
+function capitalize(s) { return s[0].toUpperCase()+s.slice(1); }
+
+
+// ═══════════════════════════════════════════════════════════
+//  SECTION 6 — CANVAS RENDERER  (Layer 4 — pure drawing)
+// ═══════════════════════════════════════════════════════════
+const Renderer = (() => {
+  let W=0, H=0;
+  let bgCtx, strokeCtx, cursorCtx, wheelCtx;
+
+  function init(w, h) {
+    W=w; H=h;
+    ['bg-canvas','stroke-canvas','cursor-canvas','wheel-canvas'].forEach(id=>{
+      const c=document.getElementById(id); c.width=w; c.height=h;
+    });
+    bgCtx     = document.getElementById('bg-canvas').getContext('2d');
+    strokeCtx = document.getElementById('stroke-canvas').getContext('2d');
+    cursorCtx = document.getElementById('cursor-canvas').getContext('2d');
+    wheelCtx  = document.getElementById('wheel-canvas').getContext('2d');
+  }
+
+  function clearStrokes() { strokeCtx.clearRect(0,0,W,H); }
+
+  // ── Guides ────────────────────────────────────────────────
+  function drawGuides(shapes) {
+    if (!shapes || !shapes.length) return;
+    bgCtx.clearRect(0,0,W,H);
+    bgCtx.save();
+    bgCtx.setLineDash([8,6]);
+    bgCtx.strokeStyle='rgba(255,255,255,0.28)';
+    bgCtx.lineWidth=2.5;
+    for (const s of shapes) _drawGuideShape(bgCtx, s);
+    bgCtx.setLineDash([]);
+    bgCtx.restore();
+  }
+
+  function _drawGuideShape(ctx, s) {
+    const cx=s.x*W, cy=s.y*H, r=s.sz*Math.min(W,H)*0.5;
+    switch(s.t){
+      case 'circle':
+        ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke(); break;
+
+      case 'triangle': {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy-r);
+        ctx.lineTo(cx+r*Math.sin(2.094), cy-r*Math.cos(2.094));
+        ctx.lineTo(cx+r*Math.sin(4.189), cy-r*Math.cos(4.189));
+        ctx.closePath(); ctx.stroke(); break;
+      }
+
+      case 'star': {
+        const pts=s.pts||5, R2=r, r2=r*0.42;
+        ctx.beginPath();
+        for(let i=0;i<pts*2;i++){
+          const a=(i*Math.PI/pts)-Math.PI/2;
+          const rad=i%2===0?R2:r2;
+          i===0 ? ctx.moveTo(cx+rad*Math.cos(a),cy+rad*Math.sin(a))
+                : ctx.lineTo(cx+rad*Math.cos(a),cy+rad*Math.sin(a));
+        }
+        ctx.closePath(); ctx.stroke(); break;
+      }
+
+      case 'tree': {
+        const tw=r*.22, th=r*.55;
+        ctx.strokeRect(cx-tw/2, cy+th*.2, tw, th*.8);
+        ctx.beginPath();
+        ctx.moveTo(cx, cy-r*.9);
+        ctx.lineTo(cx-r*.7, cy+th*.2);
+        ctx.lineTo(cx+r*.7, cy+th*.2);
+        ctx.closePath(); ctx.stroke(); break;
+      }
+
+      case 'flower': {
+        for(let i=0;i<6;i++){
+          const a=(i/6)*Math.PI*2;
+          ctx.beginPath();
+          ctx.arc(cx+r*.55*Math.cos(a), cy+r*.55*Math.sin(a), r*.32,0,Math.PI*2);
+          ctx.stroke();
+        }
+        ctx.beginPath(); ctx.arc(cx,cy,r*.25,0,Math.PI*2); ctx.stroke(); break;
+      }
+
+      case 'cloud': {
+        const parts=[[0,0,r*.45],[-r*.38,r*.12,r*.32],[r*.38,r*.12,r*.32],[-r*.18,-r*.22,r*.28],[r*.18,-r*.22,r*.28]];
+        for(const [dx,dy,cr] of parts){
+          ctx.beginPath(); ctx.arc(cx+dx,cy+dy,cr,0,Math.PI*2); ctx.stroke();
+        }
+        break;
+      }
+
+      case 'house': {
+        const hw=r*.9, hh=r*.7;
+        ctx.strokeRect(cx-hw/2, cy-hh*.2, hw, hh);
+        ctx.beginPath();
+        ctx.moveTo(cx-hw/2-5, cy-hh*.2);
+        ctx.lineTo(cx, cy-r*.9);
+        ctx.lineTo(cx+hw/2+5, cy-hh*.2);
+        ctx.stroke();
+        ctx.strokeRect(cx-hw*.12, cy+hh*.3, hw*.24, hh*.48);
+        ctx.strokeRect(cx-hw*.37, cy-hh*.05, hw*.22, hh*.24);
+        ctx.strokeRect(cx+hw*.15, cy-hh*.05, hw*.22, hh*.24);
+        break;
+      }
+
+      case 'car': {
+        const cw=r*1.3, ch=r*.5;
+        ctx.strokeRect(cx-cw/2, cy-ch*.4, cw, ch);
+        ctx.beginPath();
+        ctx.moveTo(cx-cw*.25,cy-ch*.4);
+        ctx.lineTo(cx-cw*.15,cy-ch*1.0);
+        ctx.lineTo(cx+cw*.15,cy-ch*1.0);
+        ctx.lineTo(cx+cw*.25,cy-ch*.4);
+        ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx-cw*.3, cy+ch*.6, ch*.4,0,Math.PI*2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx+cw*.3, cy+ch*.6, ch*.4,0,Math.PI*2); ctx.stroke();
+        break;
+      }
+    }
+  }
+
+  // ── Stroke rendering ──────────────────────────────────────
+  function renderStroke(ctx, stroke) {
+    switch(stroke.brush){
+      case 'smooth':   _smooth(ctx, stroke);   break;
+      case 'gradient': _gradient(ctx, stroke);  break;
+      case 'neon':     _neon(ctx, stroke);      break;
+      case 'particle': _particle(ctx, stroke);  break;
+      default:         _basic(ctx, stroke);     break;
+    }
+  }
+
+  function _path(ctx, pts) {
+    if (pts.length<2) return;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for(let i=1;i<pts.length-1;i++){
+      const mx=(pts[i].x+pts[i+1].x)/2, my=(pts[i].y+pts[i+1].y)/2;
+      ctx.quadraticCurveTo(pts[i].x,pts[i].y,mx,my);
+    }
+    ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
+  }
+
+  function _basic(ctx, s) {
+    if (s.points.length<2) return;
+    ctx.save();
+    ctx.globalAlpha=s.opacity; ctx.strokeStyle=s.color;
+    ctx.lineWidth=s.size; ctx.lineCap='round'; ctx.lineJoin='round';
+    _path(ctx, s.points); ctx.stroke(); ctx.restore();
+  }
+
+  function _smooth(ctx, s) {
+    if (s.points.length<2) return;
+    ctx.save();
+    ctx.globalAlpha=s.opacity*.9; ctx.strokeStyle=s.color;
+    ctx.lineWidth=s.size*1.1; ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.shadowColor=s.color; ctx.shadowBlur=s.size*.6;
+    _path(ctx,s.points); ctx.stroke(); ctx.restore();
+  }
+
+  function _gradient(ctx, s) {
+    if (s.points.length<2) return;
+    const p0=s.points[0], p1=s.points[s.points.length-1];
+    const g=ctx.createLinearGradient(p0.x,p0.y,p1.x,p1.y);
+    g.addColorStop(0, s.color);
+    g.addColorStop(0.5, _shiftHue(s.color,45));
+    g.addColorStop(1,   _shiftHue(s.color,90));
+    ctx.save();
+    ctx.globalAlpha=s.opacity; ctx.strokeStyle=g;
+    ctx.lineWidth=s.size; ctx.lineCap='round'; ctx.lineJoin='round';
+    _path(ctx,s.points); ctx.stroke(); ctx.restore();
+  }
+
+  function _neon(ctx, s) {
+    if (s.points.length<2) return;
+    ctx.save();
+    const passes=[
+      { w:s.size*3.5, a:.12, blur:s.size*5 },
+      { w:s.size*1.6, a:.40, blur:s.size*2.5 },
+      { w:s.size*.6,  a:1.0, blur:0 },
+    ];
+    for(const p of passes){
+      ctx.globalAlpha=p.a*s.opacity; ctx.strokeStyle=s.color;
+      ctx.lineWidth=p.w; ctx.lineCap='round'; ctx.lineJoin='round';
+      ctx.shadowColor=s.color; ctx.shadowBlur=p.blur;
+      _path(ctx,s.points); ctx.stroke();
+    }
+    // white core
+    ctx.globalAlpha=.85*s.opacity; ctx.strokeStyle='#fff';
+    ctx.lineWidth=s.size*.22; ctx.shadowBlur=0;
+    _path(ctx,s.points); ctx.stroke();
+    ctx.restore();
+  }
+
+  function _particle(ctx, s) {
+    ctx.save();
+    let seed=s.ts||1;
+    const rng=()=>{ seed=(seed*1664525+1013904223)&0xffffffff; return (seed>>>0)/0xffffffff; };
+    const count=Math.max(3,Math.floor(s.size/2)+3);
+    for(const pt of s.points){
+      for(let i=0;i<count;i++){
+        const ox=(rng()-.5)*s.size*2.6, oy=(rng()-.5)*s.size*2.6;
+        const r=rng()*s.size*.45+.8;
+        ctx.globalAlpha=(rng()*.6+.3)*s.opacity;
+        ctx.fillStyle=s.color;
+        ctx.beginPath(); ctx.arc(pt.x+ox,pt.y+oy,r,0,Math.PI*2); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  // ── Flush all permanent strokes ───────────────────────────
+  function flushStrokes(strokes) {
+    strokeCtx.clearRect(0,0,W,H);
+    for(const s of strokes) renderStroke(strokeCtx, s);
+  }
+
+  // ── Cursor frame ──────────────────────────────────────────
+  function drawCursorFrame(gs, curStroke, color, size, brush) {
+    cursorCtx.clearRect(0,0,W,H);
+
+    // Live stroke
+    if (curStroke && curStroke.length>1) {
+      renderStroke(cursorCtx, { points:curStroke, color, size, brush, opacity:1, ts:0 });
+    }
+
+    // Cursor ring
+    const cx=gs.cursorX*W, cy=gs.cursorY*H;
+    const drawing = gs.gesture==='DRAW';
+    cursorCtx.save();
+    cursorCtx.beginPath();
+    cursorCtx.arc(cx, cy, drawing ? size/2+5 : 19, 0, Math.PI*2);
+    cursorCtx.strokeStyle = drawing ? color : 'rgba(255,255,255,.85)';
+    cursorCtx.lineWidth=2.5; cursorCtx.stroke();
+    if(drawing){
+      cursorCtx.beginPath(); cursorCtx.arc(cx,cy,3,0,Math.PI*2);
+      cursorCtx.fillStyle=color; cursorCtx.fill();
+    }
+    cursorCtx.restore();
+  }
+
+  // ── Color wheel ───────────────────────────────────────────
+  function drawWheel(cx, cy, selectorX, selectorY) {
+    wheelCtx.clearRect(0,0,W,H);
+    const R=115;
+    // Backdrop
+    wheelCtx.save();
+    wheelCtx.fillStyle='rgba(0,0,0,.5)';
+    wheelCtx.beginPath(); wheelCtx.arc(cx,cy,R+22,0,Math.PI*2); wheelCtx.fill();
+    // Draw segments
+    for(let i=0;i<360;i++){
+      const a0=(i/360)*Math.PI*2-Math.PI/2;
+      const a1=((i+1)/360)*Math.PI*2-Math.PI/2;
+      const inner=R*.28;
+      const grd=wheelCtx.createRadialGradient(cx,cy,inner,cx,cy,R);
+      grd.addColorStop(0, `hsla(${i},20%,92%,.95)`);
+      grd.addColorStop(1, `hsla(${i},100%,50%,.95)`);
+      wheelCtx.beginPath();
+      wheelCtx.moveTo(cx,cy);
+      wheelCtx.arc(cx,cy,R,a0,a1);
+      wheelCtx.closePath();
+      wheelCtx.fillStyle=grd; wheelCtx.fill();
+    }
+    // Center white fade
+    const cg=wheelCtx.createRadialGradient(cx,cy,0,cx,cy,R*.28);
+    cg.addColorStop(0,'rgba(255,255,255,1)');
+    cg.addColorStop(1,'rgba(255,255,255,0)');
+    wheelCtx.beginPath(); wheelCtx.arc(cx,cy,R*.28,0,Math.PI*2);
+    wheelCtx.fillStyle=cg; wheelCtx.fill();
+    // Border
+    wheelCtx.beginPath(); wheelCtx.arc(cx,cy,R,0,Math.PI*2);
+    wheelCtx.strokeStyle='rgba(255,255,255,.8)'; wheelCtx.lineWidth=3; wheelCtx.stroke();
+    // Selector dot
+    const dx=selectorX-cx, dy=selectorY-cy;
+    const dist=Math.min(Math.hypot(dx,dy),R);
+    const ang=Math.atan2(dy,dx);
+    const sx=cx+Math.cos(ang)*dist, sy=cy+Math.sin(ang)*dist;
+    wheelCtx.beginPath(); wheelCtx.arc(sx,sy,9,0,Math.PI*2);
+    wheelCtx.strokeStyle='#fff'; wheelCtx.lineWidth=3; wheelCtx.stroke();
+    wheelCtx.beginPath(); wheelCtx.arc(sx,sy,6,0,Math.PI*2);
+    wheelCtx.fillStyle=colorFromWheelPos(sx,sy,cx,cy,R)||'#fff';
+    wheelCtx.fill();
+    // Label
+    wheelCtx.fillStyle='rgba(255,255,255,.85)';
+    wheelCtx.font='bold 13px system-ui';
+    wheelCtx.textAlign='center';
+    wheelCtx.fillText('COLOR WHEEL',cx,cy+R+28);
+    wheelCtx.restore();
+  }
+
+  function clearWheel() { wheelCtx.clearRect(0,0,W,H); }
+
+  // ── Camera preview ────────────────────────────────────────
+  function drawCamPreview(videoEl) {
+    const c=document.getElementById('cam-canvas');
+    if(!c) return;
+    const ctx=c.getContext('2d');
+    c.width=140; c.height=100;
+    ctx.save(); ctx.scale(-1,1); ctx.drawImage(videoEl,-140,0,140,100); ctx.restore();
+  }
+
+  // ── Helpers ───────────────────────────────────────────────
+  function _shiftHue(hex, deg) {
+    const m=hex.match(/^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i);
+    if(!m) return hex;
+    const [r,g,b]=[parseInt(m[1],16)/255,parseInt(m[2],16)/255,parseInt(m[3],16)/255];
+    const max=Math.max(r,g,b), min=Math.min(r,g,b);
+    let h=0, s=0; const l=(max+min)/2;
+    if(max!==min){ const d=max-min; s=l>.5?d/(2-max-min):d/(max+min);
+      switch(max){ case r:h=((g-b)/d+(g<b?6:0))/6;break; case g:h=((b-r)/d+2)/6;break; case b:h=((r-g)/d+4)/6;break; } }
+    return `hsl(${Math.round((h*360+deg)%360)},${Math.round(s*100)}%,${Math.round(l*100)}%)`;
+  }
+
+  return { init, clearStrokes, drawGuides, flushStrokes, drawCursorFrame, drawWheel, clearWheel, drawCamPreview };
+})();
+
+// Standalone color-from-wheel helper (used in GestureEngine + Renderer)
+function colorFromWheelPos(px, py, cx, cy, R) {
+  const dx=px-cx, dy=py-cy;
+  const dist=Math.hypot(dx,dy);
+  if(dist>R) return null;
+  const ang=Math.atan2(dy,dx)+Math.PI/2;
+  const hue=((ang/(Math.PI*2))*360+360)%360;
+  const sat=Math.round((dist/R)*100);
+  return `hsl(${Math.round(hue)},${sat}%,50%)`;
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  SECTION 6.5 — GESTURE UI NAVIGATION LAYER
+//
+//  State machine handling ONLY menu navigation.
+//  NEVER modifies: GestureEngine, GameEngine, drawing system.
+//
+//  Control scheme:
+//    Point hand at item  → item gets focused (position-based)
+//    DRAW hold 600ms     → confirm focused item (stability-gated)
+//    FIST                → back / cancel
+// ═══════════════════════════════════════════════════════════
+const GestureUI = (() => {
+  let activeScreen = null;   // current DOM screen id, or null = game playing
+  let items        = [];     // focusable elements on activeScreen
+  let focusIdx     = 0;      // which item is focused
+
+  // ── Timing constants ──────────────────────────────────────
+  const ACTION_COOLDOWN = 500;   // ms min between any two actions
+  const HOLD_CONFIRM_MS = 600;   // ms DRAW must be held to confirm
+  const HOLD_CIRCUMF    = 125.6; // 2π×20 (SVG circle r=20)
+
+  // ── Cursor smoothing ──────────────────────────────────────
+  const LERP_C = 0.18;
+  let smoothCX = 0.5, smoothCY = 0.5;
+
+  // ── Cursor stability gate ─────────────────────────────────
+  //  Hold-to-confirm only activates once cursor stops moving.
+  //  Prevents accidental confirms while positioning the hand.
+  const STABLE_THRESH = 0.030;   // normalized movement threshold per frame
+  const STABLE_WAIT   = 180;     // ms cursor must stay still before hold starts
+  let lastCX = 0.5, lastCY = 0.5;
+  let stableStart = null;
+
+  let lastActionTime = 0;
+  let drawHoldStart  = null;
+
+  // ── Registered action callbacks ───────────────────────────
+  let actions = {};
+  function register(a) { Object.assign(actions, a); }
+
+  // ── Screen lifecycle ──────────────────────────────────────
+  function setScreen(screenId) {
+    activeScreen  = screenId || null;
+    focusIdx      = 0;
+    drawHoldStart = null;
+    smoothCX = 0.5; smoothCY = 0.5;
+    lastCX   = 0.5; lastCY   = 0.5;
+    stableStart = null;
+
+    _refresh();
+    _applyFocus();
+
+    const isMenu = !!activeScreen;
+    const cursor = document.getElementById('gesture-cursor');
+    const hint   = document.getElementById('gu-nav-hint');
+    if (cursor) cursor.style.display = isMenu ? 'block' : 'none';
+    if (hint)   hint.className       = isMenu ? 'visible' : '';
+    _setArc(0);
+  }
+
+  // ── Focusable item collection ─────────────────────────────
+  function _refresh() {
+    items = [];
+    if (!activeScreen) return;
+    const root = document.getElementById(activeScreen);
+    if (!root) return;
+    items = [...root.querySelectorAll(
+      'button, .world-card:not(.locked), .level-card'
+    )].filter(el => {
+      const cs = getComputedStyle(el);
+      return cs.display !== 'none' && cs.visibility !== 'hidden'
+          && el.style.display !== 'none';
+    });
+    focusIdx = Math.max(0, Math.min(focusIdx, items.length - 1));
+  }
+
+  function _applyFocus() {
+    document.querySelectorAll('.gu-focused').forEach(e => e.classList.remove('gu-focused'));
+    const el = items[focusIdx];
+    if (el) {
+      el.classList.add('gu-focused');
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
+
+  // ── Position-based focus ──────────────────────────────────
+  //  Whichever item the cursor overlaps becomes focused.
+  //  User simply points at a card/button — no swipe needed.
+  function _updateFocusByPosition(screenX, screenY) {
+    _refresh();
+    for (let i = 0; i < items.length; i++) {
+      const r = items[i].getBoundingClientRect();
+      if (screenX >= r.left && screenX <= r.right &&
+          screenY >= r.top  && screenY <= r.bottom) {
+        if (i !== focusIdx) {
+          focusIdx = i;
+          _applyFocus();
+          drawHoldStart = null; // reset hold when moving to a different item
+          _setArc(0);
+          _playNav();
+        }
+        return;
+      }
+    }
+    // Cursor not over any item — keep current focus, don't reset
+  }
+
+  // ── Confirm focused item ──────────────────────────────────
+  function _confirm() {
+    const now = performance.now();
+    if (now - lastActionTime < ACTION_COOLDOWN) return;
+    lastActionTime = now;
+    drawHoldStart  = null;
+    _setArc(0);
+
+    const el = items[focusIdx]; // use cached items, no _refresh() here
+    if (!el) return;
+
+    const id = el.id;
+    if      (id==='btn-play')         actions.goWorlds?.();
+    else if (id==='btn-back-menu')    actions.goMenu?.();
+    else if (id==='btn-back-worlds')  actions.goWorlds?.();
+    else if (id==='btn-resume')       actions.resume?.();
+    else if (id==='btn-quit-pause')   actions.quitToLevels?.();
+    else if (id==='btn-retry')        actions.retry?.();
+    else if (id==='btn-next')         actions.nextLevel?.();
+    else if (id==='btn-to-levels')    actions.goLevels?.();
+    else if (el.classList.contains('world-card')) {
+      const wId = parseInt(el.dataset.worldId);
+      if (!isNaN(wId)) actions.selectWorld?.(wId);
+    }
+    else if (el.classList.contains('level-card')) {
+      const wId = parseInt(el.dataset.worldId);
+      const lId = parseInt(el.dataset.levelId);
+      if (!isNaN(wId) && !isNaN(lId)) actions.selectLevel?.(wId, lId);
+    }
+    _playConfirm();
+  }
+
+  // ── Back ──────────────────────────────────────────────────
+  function _back() {
+    const now = performance.now();
+    if (now - lastActionTime < ACTION_COOLDOWN) return;
+    lastActionTime = now;
+
+    if      (activeScreen === 'world-screen')    actions.goMenu?.();
+    else if (activeScreen === 'level-screen')    actions.goWorlds?.();
+    else if (activeScreen === 'pause-screen')    actions.resume?.();
+    else if (activeScreen === 'complete-screen') actions.goLevels?.();
+    _playBack();
+  }
+
+  // ── Gesture cursor + hold-ring update ────────────────────
+  function _updateCursor(cx, cy, gesture) {
+    const el = document.getElementById('gesture-cursor');
+    if (!el) return;
+    el.style.left = (cx * window.innerWidth)  + 'px';
+    el.style.top  = (cy * window.innerHeight) + 'px';
+    el.className  = (gesture === 'DRAW') ? 'draw-active' : '';
+  }
+
+  function _setArc(ratio) {
+    const arc = document.getElementById('gu-hold-arc');
+    if (!arc) return;
+    const len = Math.max(0, Math.min(1, ratio)) * HOLD_CIRCUMF;
+    arc.style.strokeDasharray = `${len} ${HOLD_CIRCUMF}`;
+  }
+
+  // ── Sound helpers ─────────────────────────────────────────
+  function _playNav()     { try { Audio.gestureChange('UNKNOWN'); } catch(_){} }
+  function _playConfirm() { try { Audio.colorPick(); } catch(_){} }
+  function _playBack()    { try { Audio.gestureChange('FIST'); } catch(_){} }
+
+  // ── Main per-frame update (called from _onFrame) ──────────
+  function onGestureState(gs) {
+    if (!activeScreen) return;
+
+    // Smooth raw cursor to suppress jitter
+    smoothCX += (gs.cursorX - smoothCX) * LERP_C;
+    smoothCY += (gs.cursorY - smoothCY) * LERP_C;
+
+    _updateCursor(smoothCX, smoothCY, gs.gesture);
+
+    // Focus whichever item the cursor is pointing at
+    _updateFocusByPosition(
+      smoothCX * window.innerWidth,
+      smoothCY * window.innerHeight
+    );
+
+    // Stability gate: cursor must stop moving before hold timer counts
+    const moving = Math.abs(smoothCX - lastCX) > STABLE_THRESH ||
+                   Math.abs(smoothCY - lastCY) > STABLE_THRESH;
+    lastCX = smoothCX; lastCY = smoothCY;
+    if (moving) {
+      stableStart = null;
+    } else if (!stableStart) {
+      stableStart = performance.now();
+    }
+    const cursorStable = stableStart !== null &&
+                         (performance.now() - stableStart) >= STABLE_WAIT;
+
+    // Hold-to-confirm: DRAW gesture + cursor stable
+    if (gs.gesture === 'DRAW' && cursorStable) {
+      if (!drawHoldStart) drawHoldStart = performance.now();
+      const held = performance.now() - drawHoldStart;
+      _setArc(held / HOLD_CONFIRM_MS);
+      if (held >= HOLD_CONFIRM_MS) _confirm();
+    } else {
+      if (drawHoldStart) { drawHoldStart = null; _setArc(0); }
+    }
+  }
+
+  // ── Gesture-change hook (called from _onFrame when not playing) ──
+  function onGestureChange(next) {
+    if (!activeScreen) return;
+    if (next === 'FIST') _back();
+  }
+
+  return { register, setScreen, onGestureState, onGestureChange };
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+//  SECTION 7 — AUDIO MANAGER
+// ═══════════════════════════════════════════════════════════
+const Audio = (() => {
+  let ctx=null;
+  function ensure(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)(); }
+
+  function tone(freq, dur, type='sine', gain=0.15) {
+    try {
+      ensure();
+      const o=ctx.createOscillator(), g=ctx.createGain();
+      o.type=type; o.frequency.value=freq;
+      g.gain.setValueAtTime(gain, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+dur);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime+dur);
+    } catch(_){}
+  }
+
+  function strokeStart() { tone(880,0.06,'sine',0.08); }
+  function colorPick()   { tone(1100,0.08,'sine',0.10); }
+  function gestureChange(g) {
+    const freqs={DRAW:660,OPEN_PALM:440,PINCH:880,PEACE:780,FIST:330,UNKNOWN:0};
+    if(freqs[g]) tone(freqs[g],0.05,'triangle',0.06);
+  }
+  function levelComplete(stars) {
+    const notes=stars===3?[523,659,784,1047]:[523,659,784];
+    notes.forEach((f,i)=>setTimeout(()=>tone(f,.18,'sine',.14),i*130));
+  }
+  function tick() { tone(880,0.04,'square',0.04); }
+
+  return { strokeStart, colorPick, gestureChange, levelComplete, tick };
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+//  SECTION 8 — UI MANAGER
+// ═══════════════════════════════════════════════════════════
+const UI = (() => {
+  let currentScreen='menu-screen';
+
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    if(id){ document.getElementById(id).classList.add('active'); currentScreen=id; }
+  }
+
+  function showGame(show) {
+    document.getElementById('game').style.display=show?'flex':'none';
+  }
+
+  function updateHUD(world, level, timer, stars, xp, urgent) {
+    const w=WORLDS[world], lv=w.levels[level];
+    document.getElementById('hud-world').textContent=`${w.emoji} ${w.name}`;
+    document.getElementById('hud-world').style.color=w.color;
+    document.getElementById('hud-level').textContent=lv.name;
+    const t=document.getElementById('hud-timer');
+    const m=Math.floor(timer/60), s=String(timer%60).padStart(2,'0');
+    t.textContent=`⏱ ${m}:${s}`;
+    t.className='timer'+(urgent?' urgent':'');
+    document.getElementById('hud-stars').textContent=stars;
+    document.getElementById('hud-xp').textContent=xp;
+  }
+
+  function updateGesture(g) {
+    const icons={OPEN_PALM:'✋',DRAW:'👆',FIST:'✊',PINCH:'🤏',PEACE:'✌️',UNKNOWN:'🤚'};
+    document.getElementById('gesture-icon').textContent=icons[g]||'🤚';
+    document.getElementById('gesture-name').textContent=g;
+  }
+
+  function updateColor(c) {
+    document.getElementById('color-dot').style.background=c;
+  }
+
+  function buildBrushBtns(brushes, active, onSelect) {
+    const emojis={basic:'🖊',smooth:'🖌',gradient:'🌈',neon:'⚡',particle:'✨'};
+    const wrap=document.getElementById('brush-btns'); wrap.innerHTML='';
+    for(const b of brushes){
+      const btn=document.createElement('button');
+      btn.className='sb-btn'+(b===active?' active':'');
+      btn.textContent=`${emojis[b]||'🖊'} ${b}`;
+      btn.onclick=()=>onSelect(b);
+      wrap.appendChild(btn);
+    }
+  }
+
+  function buildSizeBtns(sizes, active, onSelect) {
+    const wrap=document.getElementById('size-btns'); wrap.innerHTML='';
+    for(const [label,sz] of Object.entries(sizes)){
+      const btn=document.createElement('button');
+      btn.className='sb-btn'+(sz===active?' active':'');
+      btn.textContent=label;
+      btn.onclick=()=>onSelect(sz);
+      wrap.appendChild(btn);
+    }
+  }
+
+  function setHint(text) {
+    document.getElementById('hint').textContent=text?`💡 ${text}`:'';
+  }
+
+  function buildWorldGrid(onSelect) {
+    const grid=document.getElementById('world-grid'); grid.innerHTML='';
+    const p=ProgressManager.load();
+    for(const w of WORLDS){
+      const locked=p.xp<w.xpReq;
+      const div=document.createElement('div');
+      div.className='world-card'+(locked?' locked':'');
+      div.style.borderColor=w.color;
+      const stars=WORLDS.flatMap(wr=>wr.levels).reduce((s,l)=>{
+        const k=`${l.id===undefined?w.id:w.id}-${l.id}`;
+        return s+(p.completedLevels[k]||0);
+      },0);
+      div.dataset.worldId = w.id;
+      div.innerHTML=`<span class="world-emoji">${w.emoji}</span>
+        <div class="world-title" style="color:${w.color}">${w.name}</div>
+        <div class="world-desc">${w.desc}</div>
+        ${locked?`<div class="world-req">🔒 Requires ${w.xpReq} XP</div>`:''}`;
+      // No onclick — GestureUI reads data-world-id and calls actions.selectWorld
+      grid.appendChild(div);
+    }
+  }
+
+  function buildLevelList(worldIdx, onSelect) {
+    const w=WORLDS[worldIdx];
+    document.getElementById('level-screen-title').textContent=`${w.emoji} ${w.name}`;
+    document.getElementById('level-screen-desc').textContent=w.desc;
+    const list=document.getElementById('level-list'); list.innerHTML='';
+    for(const lv of w.levels){
+      const stars=ProgressManager.getLevelStars(worldIdx,lv.id);
+      const card=document.createElement('div');
+      card.className='level-card';
+      card.dataset.worldId = worldIdx;
+      card.dataset.levelId = lv.id;
+      card.innerHTML=`<div class="level-row">
+        <span class="level-title">${lv.id+1}. ${lv.name}</span>
+        <span class="level-stars">${[0,1,2].map(i=>i<stars?'⭐':'☆').join('')}</span>
+      </div>
+      <div class="level-desc">${lv.desc}</div>
+      <div class="level-time">⏱ ${lv.time}s</div>`;
+      // No onclick — GestureUI reads data attributes and calls actions.selectLevel
+      list.appendChild(card);
+    }
+  }
+
+  function showComplete(data) {
+    const { stars, xpGained, score, unlocks, hasNext } = data;
+    const titles=['😐 Incomplete','🌟 1 Star!','⭐⭐ 2 Stars!','🏆 3 Stars!'];
+    document.getElementById('complete-title').textContent=titles[Math.min(3,stars)];
+    document.getElementById('complete-stars').innerHTML=
+      [0,1,2].map(i=>`<span style="font-size:42px;filter:${i<stars?'none':'grayscale(1)'}">⭐</span>`).join('');
+
+    // Score bars
+    const bars=[
+      { label:'Accuracy',  val:score.accuracy,   max:40, color:'#6C63FF' },
+      { label:'Color Use', val:score.colorUsage,  max:20, color:'#2ECC71' },
+      { label:'Time',      val:score.timeBonus,   max:20, color:'#F39C12' },
+      { label:'Smooth',    val:score.smoothness,  max:20, color:'#E91E63' },
+    ];
+    document.getElementById('score-bars').innerHTML=bars.map(b=>`
+      <div class="score-bar-row">
+        <div class="score-bar-label">${b.label}</div>
+        <div class="score-bar-track">
+          <div class="score-bar-fill" style="width:${(b.val/b.max)*100}%;background:${b.color}"></div>
+        </div>
+        <div style="color:#888;font-size:11px">${b.val}/${b.max}</div>
+      </div>`).join('');
+
+    document.getElementById('complete-score').textContent=`Total: ${score.total}/100`;
+    document.getElementById('xp-badge-wrap').innerHTML=`<div class="xp-badge">+${xpGained} XP</div>`;
+    document.getElementById('unlock-list').innerHTML=
+      unlocks.map(u=>`<div class="unlock-item">🎁 ${u.desc}</div>`).join('');
+
+    const nb=document.getElementById('btn-next');
+    nb.style.display=hasNext?'':'none';
+    // Actions are wired via GestureUI.register() in _finishLevel — no onclick needed
+
+    showScreen('complete-screen');
+  }
+
+  function updateMenuMeta() {
+    const p=ProgressManager.load();
+    document.getElementById('menu-meta').textContent=`XP: ${p.xp} • ⭐ ${p.totalStars} stars`;
+  }
+
+  return { showScreen, showGame, updateHUD, updateGesture, updateColor,
+           buildBrushBtns, buildSizeBtns, setHint, buildWorldGrid,
+           buildLevelList, showComplete, updateMenuMeta };
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+//  SECTION 8.5 — GESTURE SIDEBAR CONTROLLER
+//
+//  Converts the existing sidebar from mouse → gesture input.
+//  Touches NOTHING in the game/drawing/gesture-engine layers.
+//  Uses only: hand position → focus, DRAW hold → .click()
+//
+//  Zone rule: ONLY active when cursorX > 0.70 (right 30%)
+//  Outside that zone: sidebar is completely ignored.
+// ═══════════════════════════════════════════════════════════
+const GestureSidebar = (() => {
+  // ── Constants ─────────────────────────────────────────────
+  const ZONE_X        = 0.70;  // sidebar zone threshold (normalized)
+  const HOLD_MS       = 400;   // ms DRAW must be held to trigger click
+  const COOLDOWN_MS   = 600;   // ms min between consecutive actions
+  const LERP_Y        = 0.22;  // cursor Y smoothing factor
+
+  // ── Runtime state ─────────────────────────────────────────
+  let focusedEl      = null;
+  let holdStart      = null;
+  let lastActionTime = 0;
+  let smoothY        = 0.5;    // smoothed cursor Y (normalized)
+  let inZone         = false;  // whether hand is currently in sidebar zone
+
+  // ── Get all interactable sidebar items ────────────────────
+  function _items() {
+    const sb = document.getElementById('sidebar');
+    if (!sb) return [];
+    return [...sb.querySelectorAll('.sb-btn, .action-btn')].filter(el => {
+      const cs = getComputedStyle(el);
+      return cs.display !== 'none' && cs.visibility !== 'hidden';
+    });
+  }
+
+  // ── Find item whose bounding rect contains the given screen Y ─
+  function _itemAtY(screenY) {
+    for (const el of _items()) {
+      const r = el.getBoundingClientRect();
+      if (screenY >= r.top && screenY <= r.bottom) return el;
+    }
+    return null;
+  }
+
+  // ── Apply / clear focus class + hold-progress CSS var ─────
+  function _setFocus(el) {
+    if (el === focusedEl) return;
+    if (focusedEl) {
+      focusedEl.classList.remove('sb-focused');
+      focusedEl.style.removeProperty('--hp');
+    }
+    focusedEl = el;
+    if (focusedEl) focusedEl.classList.add('sb-focused');
+    holdStart = null; // reset hold timer on item change
+  }
+
+  function _setProgress(ratio) {
+    if (focusedEl) focusedEl.style.setProperty('--hp', Math.max(0, Math.min(1, ratio)));
+  }
+
+  // ── Zone edge indicator ───────────────────────────────────
+  function _setZoneEdge(active) {
+    const el = document.getElementById('sb-zone-edge');
+    if (el) el.className = active ? 'active' : '';
+  }
+
+  // ── Main per-frame entry (called from _onFrame, playing only) ─
+  function onGestureState(gs) {
+    const nowInZone = gs.cursorX > ZONE_X;
+
+    // Zone entry / exit
+    if (nowInZone !== inZone) {
+      inZone = nowInZone;
+      _setZoneEdge(inZone);
+      if (!inZone) { _setFocus(null); holdStart = null; _setProgress(0); }
+    }
+
+    if (!inZone) return; // ← drawing system handles everything outside
+
+    // Smooth Y to prevent jitter-induced focus flicker
+    smoothY += (gs.cursorY - smoothY) * LERP_Y;
+    const screenY = smoothY * window.innerHeight;
+
+    // Update focused item
+    _setFocus(_itemAtY(screenY));
+
+    // Hold detection — only DRAW gesture while stable
+    if (gs.gesture === 'DRAW' && gs.isStable && focusedEl) {
+      if (!holdStart) holdStart = performance.now();
+      const held = performance.now() - holdStart;
+      _setProgress(held / HOLD_MS);
+
+      if (held >= HOLD_MS) {
+        const now = performance.now();
+        if (now - lastActionTime >= COOLDOWN_MS) {
+          lastActionTime = now;
+          holdStart = null;
+          _setProgress(0);
+          focusedEl.click(); // ← reuse existing onclick handlers, unchanged
+          Audio.colorPick();
+        }
+      }
+    } else {
+      holdStart = null;
+      _setProgress(0);
+    }
+  }
+
+  // ── Expose isInZone so _onFrame can skip drawing ──────────
+  function isInZone() { return inZone; }
+
+  return { onGestureState, isInZone };
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+//  SECTION 9 — MAIN GAME ORCHESTRATOR
+// ═══════════════════════════════════════════════════════════
+const Game = (() => {
+  // ── State ─────────────────────────────────────────────────
+  const state = {
+    phase:       'menu',    // menu|worldSelect|levelSelect|playing|paused|complete
+    worldIdx:    0,
+    levelIdx:    0,
+    strokes:     [],
+    curPoints:   [],
+    color:       '#FF6B6B',
+    brush:       'basic',
+    size:        BRUSH_SIZES.M,
+    timeLeft:    60,
+    isDrawing:   false,
+    showWheel:   false,
+    wheelX:      0.5,
+    wheelY:      0.5,
+    lastGesture: 'OPEN_PALM',
+    score:       null,
+    xp:          0,
+    totalStars:  0,
+  };
+
+  // Refs for per-frame data (never trigger layout)
+  let gestureState  = { gesture:'OPEN_PALM', confidence:0, isStable:false, cursorX:.5, cursorY:.5 };
+  let prevGesture   = 'OPEN_PALM';
+  let timerInterval = null;
+  let animHandle    = null;
+  let sizeKeys      = null;
+
+  // Modules
+  const engine  = new GameEngine();
+  const gesEng  = new GestureEngine();
+  let   tracker = null;
+  const videoEl = document.getElementById('webcam');
+
+  // ── Init ──────────────────────────────────────────────────
+  async function init() {
+    const W = window.innerWidth, H = window.innerHeight;
+    Renderer.init(W, H);
+    sizeKeys = Object.keys(BRUSH_SIZES);
+
+    _bindUI();
+    _registerGestureUIActions();
+
+    const p = ProgressManager.load();
+    state.xp = p.xp; state.totalStars = p.totalStars;
+    UI.updateMenuMeta();
+
+    document.getElementById('load-status').textContent = 'Starting camera…';
+    tracker = new HandTracker(videoEl, _onFrame);
+
+    try {
+      await tracker.start();
+      document.getElementById('loading').style.display='none';
+      UI.showScreen('menu-screen');
+      GestureUI.setScreen('menu-screen');
+    } catch(e) {
+      document.getElementById('load-status').textContent = '⚠ Camera error: '+e.message;
+    }
+
+    window.addEventListener('resize', ()=>{
+      Renderer.init(window.innerWidth, window.innerHeight);
+      if(state.phase==='playing'||state.phase==='paused') _renderGuides();
+    });
+
+    _loop();
+  }
+
+  // ── Camera frame callback ─────────────────────────────────
+  function _onFrame(frame) {
+    gestureState = gesEng.process(frame);
+
+    // Draw cam preview (every frame, regardless of phase)
+    if(videoEl.readyState>=2) Renderer.drawCamPreview(videoEl);
+
+    // ── Route to GestureUI when on a menu screen ──────────────
+    const isMenuPhase = state.phase !== 'playing' && state.phase !== 'paused';
+    if (isMenuPhase || state.phase === 'paused') {
+      GestureUI.onGestureState(gestureState);
+      const g = gestureState.gesture;
+      if (g !== prevGesture) {
+        GestureUI.onGestureChange(g);
+        prevGesture = g;
+      }
+      if (isMenuPhase) return; // don't fall through to gameplay logic
+    }
+
+    // ── Playing phase: existing gameplay gesture logic (unchanged) ──
+    if(state.phase !== 'playing') return;
+
+    const g = gestureState.gesture;
+
+    // Gesture change logic
+    if(g !== prevGesture) {
+      _onGestureChange(g, prevGesture);
+      prevGesture = g;
+      UI.updateGesture(g);
+      state.lastGesture = g;
+    }
+
+    // Sidebar gesture adapter — runs first, self-guards to x > 70% zone
+    GestureSidebar.onGestureState(gestureState);
+
+    // Active draw — skipped when hand is in sidebar zone
+    if(g === 'DRAW' && !GestureSidebar.isInZone()) {
+      const pt = {
+        x: gestureState.cursorX * window.innerWidth,
+        y: gestureState.cursorY * window.innerHeight,
+        ts: performance.now()
+      };
+      if(!state.isDrawing) {
+        state.isDrawing = true;
+        state.curPoints = [pt];
+        Audio.strokeStart();
+      } else {
+        state.curPoints.push(pt);
+        engine.trackStroke(state.curPoints);
+      }
+    } else if(state.isDrawing) {
+      _commitStroke(); // commit in-progress stroke if gesture changed OR entered sidebar zone
+    }
+  }
+
+  // ── Gesture transitions ───────────────────────────────────
+  function _onGestureChange(next, prev) {
+    Audio.gestureChange(next);
+
+    if(next==='FIST') {
+      if(state.phase==='playing') {
+        state.phase='paused';
+        UI.showScreen('pause-screen');
+        GestureUI.setScreen('pause-screen');
+        stopTimer();
+      }
+      // paused→playing is handled by GestureUI via actions.resume
+      return;
+    }
+
+    if(next==='PINCH') {
+      state.showWheel=true;
+      state.wheelX=gestureState.cursorX;
+      state.wheelY=gestureState.cursorY;
+    }
+
+    if(prev==='PINCH' && next!=='PINCH') {
+      // Pick color from wheel
+      const cx=state.wheelX*window.innerWidth, cy=state.wheelY*window.innerHeight;
+      const sx=gestureState.cursorX*window.innerWidth, sy=gestureState.cursorY*window.innerHeight;
+      const c=colorFromWheelPos(sx,sy,cx,cy,115);
+      if(c){ state.color=c; UI.updateColor(c); Audio.colorPick(); }
+      state.showWheel=false;
+      Renderer.clearWheel();
+    }
+
+    if(next==='PEACE') {
+      // Cycle brush size
+      const vals=Object.values(BRUSH_SIZES);
+      const i=vals.indexOf(state.size);
+      state.size=vals[(i+1)%vals.length];
+      UI.buildSizeBtns(BRUSH_SIZES, state.size, sz=>{ state.size=sz; UI.buildSizeBtns(BRUSH_SIZES,state.size,()=>{}); });
+    }
+  }
+
+  // ── Commit stroke ─────────────────────────────────────────
+  function _commitStroke() {
+    const pts = state.curPoints;
+    if(pts.length>=2) {
+      const stroke={ id:`${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        points:[...pts], color:state.color, size:state.size,
+        brush:state.brush, opacity:1, ts:Date.now() };
+      state.strokes.push(stroke);
+      Renderer.flushStrokes(state.strokes);
+      engine.updateStrokes(state.strokes);
+    }
+    state.isDrawing=false; state.curPoints=[];
+  }
+
+  // ── Timer ─────────────────────────────────────────────────
+  function startTimer() {
+    if(timerInterval) return;
+    timerInterval=setInterval(()=>{
+      if(state.phase!=='playing'){ stopTimer(); return; }
+      state.timeLeft--;
+      const lv=WORLDS[state.worldIdx].levels[state.levelIdx];
+      UI.updateHUD(state.worldIdx,state.levelIdx,state.timeLeft,state.totalStars,state.xp,state.timeLeft<=10);
+      if(state.timeLeft<=10) Audio.tick();
+      if(state.timeLeft<=0){ stopTimer(); _finishLevel(); }
+    },1000);
+  }
+
+  function stopTimer() { clearInterval(timerInterval); timerInterval=null; }
+
+  // ── Level management ──────────────────────────────────────
+  function startLevel(wId, lId) {
+    state.worldIdx=wId; state.levelIdx=lId;
+    state.strokes=[]; state.curPoints=[];
+    state.isDrawing=false; state.showWheel=false;
+    prevGesture='OPEN_PALM'; gesEng.reset();
+
+    const lv=WORLDS[wId].levels[lId];
+    state.timeLeft=lv.time;
+    engine.startLevel(wId,lId);
+
+    Renderer.clearStrokes();
+    _renderGuides();
+
+    // Sidebar
+    const brushes=engine.getBrushes();
+    UI.buildBrushBtns(brushes, state.brush, b=>{ state.brush=b; UI.buildBrushBtns(engine.getBrushes(),state.brush,()=>{}); });
+    UI.buildSizeBtns(BRUSH_SIZES, state.size, sz=>{ state.size=sz; UI.buildSizeBtns(BRUSH_SIZES,state.size,()=>{}); });
+    UI.setHint(lv.hint||'');
+    UI.updateColor(state.color);
+    UI.updateGesture('OPEN_PALM');
+    UI.updateHUD(wId,lId,state.timeLeft,state.totalStars,state.xp,false);
+
+    state.phase='playing';
+    UI.showGame(true); UI.showScreen(null);
+    GestureUI.setScreen(null); // game playing — GestureUI is idle
+    startTimer();
+  }
+
+  function _finishLevel() {
+    if(state.isDrawing) _commitStroke();
+    state.phase='complete';
+    const lv=WORLDS[state.worldIdx].levels[state.levelIdx];
+    const score=engine.calcScore(state.strokes,state.timeLeft,lv.time);
+    const result=engine.finalize(score);
+    state.score=score;
+    state.xp=result.progress.xp;
+    state.totalStars=result.progress.totalStars;
+
+    const hasNext=state.levelIdx<WORLDS[state.worldIdx].levels.length-1;
+
+    // Register dynamic complete-screen actions before showing screen
+    const wId=state.worldIdx, lId=state.levelIdx;
+    GestureUI.register({
+      retry:     () => startLevel(wId, lId),
+      nextLevel: () => { if(hasNext) startLevel(wId, lId+1); },
+      goLevels:  () => {
+        UI.showGame(false);
+        UI.showScreen('level-screen');
+        UI.buildLevelList(wId, startLevel);
+        GestureUI.setScreen('level-screen');
+        state.phase='menu';
+      },
+    });
+
+    UI.showComplete({ stars:result.stars, xpGained:result.xpGained, score, unlocks:result.unlocks, hasNext });
+    GestureUI.setScreen('complete-screen');
+    Audio.levelComplete(result.stars);
+  }
+
+  function _renderGuides() {
+    const lv=WORLDS[state.worldIdx].levels[state.levelIdx];
+    Renderer.drawGuides(lv.target.shapes||null);
+  }
+
+  // ── Render loop ───────────────────────────────────────────
+  function _loop() {
+    if(state.phase==='playing'||state.phase==='paused'){
+      if(state.showWheel){
+        Renderer.drawWheel(
+          state.wheelX*window.innerWidth,
+          state.wheelY*window.innerHeight,
+          gestureState.cursorX*window.innerWidth,
+          gestureState.cursorY*window.innerHeight
+        );
+      }
+      Renderer.drawCursorFrame(gestureState, state.curPoints, state.color, state.size, state.brush);
+    }
+    animHandle=requestAnimationFrame(_loop);
+  }
+
+  // ── UI wiring ─────────────────────────────────────────────
+  function _bindUI() {
+    // ── Menu navigation: all handled by GestureUI, no onclick on menu buttons ──
+
+    // ── Gameplay sidebar buttons: keep onclick (these are in-game controls) ──
+    document.getElementById('btn-undo').onclick=()=>{
+      if(state.strokes.length){ state.strokes.pop(); Renderer.flushStrokes(state.strokes); }
+    };
+    document.getElementById('btn-clear').onclick=()=>{
+      state.strokes=[]; state.curPoints=[]; Renderer.clearStrokes();
+    };
+    document.getElementById('btn-done').onclick=()=>{ stopTimer(); _finishLevel(); };
+  }
+
+  function _onWorldSelect(wId) {
+    state.worldIdx=wId;
+    UI.showScreen('level-screen');
+    UI.buildLevelList(wId, startLevel);
+    GestureUI.setScreen('level-screen');
+  }
+
+  // ── GestureUI action registry ─────────────────────────────
+  function _registerGestureUIActions() {
+    GestureUI.register({
+      // Main menu
+      goMenu: () => {
+        UI.showScreen('menu-screen');
+        GestureUI.setScreen('menu-screen');
+        UI.updateMenuMeta();
+      },
+      // World select
+      goWorlds: () => {
+        UI.showScreen('world-screen');
+        UI.buildWorldGrid(_onWorldSelect);
+        GestureUI.setScreen('world-screen');
+      },
+      // Level select (uses current worldIdx)
+      goLevels: () => {
+        UI.showGame(false);
+        UI.showScreen('level-screen');
+        UI.buildLevelList(state.worldIdx, startLevel);
+        GestureUI.setScreen('level-screen');
+        state.phase='menu';
+      },
+      // Select world card
+      selectWorld: (wId) => _onWorldSelect(wId),
+      // Select level card
+      selectLevel: (wId, lId) => startLevel(wId, lId),
+      // Resume from pause
+      resume: () => {
+        state.phase='playing';
+        UI.showScreen(null);
+        GestureUI.setScreen(null);
+        startTimer();
+      },
+      // Quit to levels from pause
+      quitToLevels: () => {
+        stopTimer(); state.phase='menu';
+        UI.showGame(false);
+        UI.showScreen('level-screen');
+        UI.buildLevelList(state.worldIdx, startLevel);
+        GestureUI.setScreen('level-screen');
+      },
+      // Level complete screen actions (set dynamically in _finishLevel)
+      retry: null, nextLevel: null,
+    });
+  }
+
+  return { init };
+})();
+
+// ── Boot ──────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  // Wait for MediaPipe CDN scripts to be ready
+  let attempts=0;
+  const waitReady=()=>{
+    if(typeof Hands !== 'undefined' && typeof Camera !== 'undefined'){
+      Game.init();
+    } else if(attempts++ < 30){
+      document.getElementById('load-status').textContent=`Loading MediaPipe… (${attempts})`;
+      setTimeout(waitReady,500);
+    } else {
+      document.getElementById('load-status').textContent='⚠ Failed to load MediaPipe. Check internet connection.';
+    }
+  };
+  waitReady();
+});
+</script>
+</body>
+</html>
