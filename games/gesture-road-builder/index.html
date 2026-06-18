@@ -7,22 +7,19 @@
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
+
+  <!-- ── Game canvas (fills viewport) ──────────────────────────────────── -->
   <div id="game-container">
     <canvas id="game-canvas" width="960" height="540"></canvas>
     <video id="webcam" autoplay playsinline muted></video>
-    <div id="camera-preview">
-      <canvas id="camera-canvas" width="192" height="144"></canvas>
-      <div id="tracking-bar">
-        <div id="tracking-dot"></div>
-        <span id="tracking-label">Initializing…</span>
-      </div>
-    </div>
+
+    <!-- Gesture feedback — bottom-left of canvas -->
     <div id="gesture-panel">
       <div id="gesture-icon-display"></div>
       <div id="gesture-name-display"></div>
       <div id="gesture-ring-container">
-        <svg id="gesture-ring" viewBox="0 0 44 44" width="44" height="44">
-          <circle cx="22" cy="22" r="18" fill="none" stroke="#ffffff22" stroke-width="4"/>
+        <svg id="gesture-ring" viewBox="0 0 44 44" width="40" height="40">
+          <circle cx="22" cy="22" r="18" fill="none" stroke="#ffffff1a" stroke-width="4"/>
           <circle id="ring-progress" cx="22" cy="22" r="18" fill="none"
                   stroke="#00e5ff" stroke-width="4"
                   stroke-dasharray="0 113" stroke-linecap="round"
@@ -30,10 +27,28 @@
         </svg>
       </div>
     </div>
+
     <div id="warning-banner" class="hidden"></div>
   </div>
 
-  <!-- CDN Libraries -->
+  <!-- ── Camera preview — fixed top-right overlay (outside game-container) -->
+  <div id="camera-preview">
+    <div id="camera-header">
+      <span id="camera-header-label">Hand Tracking</span>
+    </div>
+    <canvas id="camera-canvas" width="220" height="165"></canvas>
+    <div id="tracking-bar">
+      <div id="tracking-dot"></div>
+      <span id="tracking-label">Initializing…</span>
+    </div>
+  </div>
+
+  <!-- Small restore button shown when preview is hidden -->
+  <button id="camera-toggle-btn" title="Show camera preview" aria-label="Show camera preview">
+    📷
+  </button>
+
+  <!-- ── CDN Libraries ─────────────────────────────────────────────────── -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>

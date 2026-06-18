@@ -3,10 +3,11 @@ window.GRB = window.GRB || {};
 const GESTURES = {
   NONE: 'none',
   PINCH: 'pinch',
-  OPEN_PALM: 'open_palm',
+  V_SIGN: 'v_sign',         // ✌️ index + middle up → undo road (700ms)
+  OPEN_PALM: 'open_palm',   // 🙌 all fingers open → clear all (1.5s)
   CLOSED_FIST: 'closed_fist',
   THUMBS_UP: 'thumbs_up',
-  PALM_HIGH: 'palm_high'   // open palm raised above head area
+  PALM_HIGH: 'palm_high'    // kept as fall-through alias for clear all
 };
 
 GRB.GestureManager = class {
@@ -50,8 +51,9 @@ GRB.GestureManager = class {
 
     this.HOLD_DURATIONS = {
       [GESTURES.THUMBS_UP]:    1000,   // 1 s → start vehicle
-      [GESTURES.OPEN_PALM]:    1500,   // 1.5 s → undo
-      [GESTURES.PALM_HIGH]:    2000,   // 2 s → clear all
+      [GESTURES.V_SIGN]:        700,   // 0.7 s → undo last road
+      [GESTURES.OPEN_PALM]:    1500,   // 1.5 s → clear all roads
+      [GESTURES.PALM_HIGH]:    1500,   // 1.5 s → clear all (alias)
       [GESTURES.CLOSED_FIST]:  1000    // 1 s → pause/resume
     };
 
@@ -129,6 +131,9 @@ GRB.GestureManager = class {
     const thumbUp  = lm[4].y < lm[3].y - 0.02;
     const allCurl  = !indexExt && !middleExt && !ringExt && !pinkyExt;
     const allOpen  = indexExt && middleExt && ringExt && pinkyExt;
+
+    // ✌️ V sign: index + middle up, ring + pinky curled
+    if (indexExt && middleExt && !ringExt && !pinkyExt) return GESTURES.V_SIGN;
 
     if (thumbUp && allCurl) return GESTURES.THUMBS_UP;
     if (allCurl) return GESTURES.CLOSED_FIST;

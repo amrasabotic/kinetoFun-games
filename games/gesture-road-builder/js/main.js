@@ -23,12 +23,12 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 window.addEventListener('DOMContentLoaded', async () => {
   // Verify CDN libraries loaded
   const missing = [];
-  if (typeof Matter    === 'undefined') missing.push('Matter.js');
-  if (typeof Hands     === 'undefined') missing.push('MediaPipe Hands');
-  if (typeof Camera    === 'undefined') missing.push('MediaPipe Camera Utils');
+  if (typeof Matter === 'undefined') missing.push('Matter.js');
+  if (typeof Hands === 'undefined') missing.push('MediaPipe Hands');
+  if (typeof Camera === 'undefined') missing.push('MediaPipe Camera Utils');
 
   const canvas = document.getElementById('game-canvas');
-  const ctx    = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d');
 
   if (missing.length > 0) {
     ctx.fillStyle = '#0d1b2a';
@@ -46,10 +46,29 @@ window.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // Create and initialize the game engine
-  const game = new GRB.GameEngine();
-  await game.init();
+  try {
+    // Create and initialize the game engine
+    const game = new GRB.GameEngine();
+    await game.init();
 
-  // Expose for debugging
-  window._GRB_game = game;
+    // Expose for debugging
+    window._GRB_game = game;
+
+    // Log success
+    console.log('[main.js] Game initialized successfully');
+  } catch (err) {
+    console.error('[main.js] Game initialization failed:', err);
+    ctx.fillStyle = '#0d1b2a';
+    ctx.fillRect(0, 0, 960, 540);
+    ctx.fillStyle = '#ff6b6b';
+    ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Game initialization failed', 480, 220);
+    ctx.fillStyle = '#fff';
+    ctx.font = '14px "Segoe UI", sans-serif';
+    ctx.fillText(err.message, 480, 260);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '12px "Segoe UI", sans-serif';
+    ctx.fillText('Check browser console (F12) for details', 480, 290);
+  }
 });

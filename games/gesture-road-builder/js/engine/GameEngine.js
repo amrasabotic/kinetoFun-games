@@ -7,6 +7,7 @@ const STATE = {
   CAMPAIGN_SELECT: 'campaign_select',
   HIGH_SCORES:     'high_scores',
   HOW_TO_PLAY:     'how_to_play',
+  SETTINGS:        'settings',
   DRAW:            'draw',
   SIMULATION:      'simulation',
   PAUSED:          'paused',
@@ -58,10 +59,14 @@ GRB.GameEngine = class {
 
     // Menu scroll
     this._prevCursorY = 0;
+
+    // Cursor trail: [{x, y, t}] — t is performance.now() timestamp
+    this._cursorTrail = [];
   }
 
   // ─── Initialization ────────────────────────────────────────────────────────
   async init() {
+    console.log('[GameEngine] Initializing...');
     this.save      = new GRB.SaveSystem();
     this.particles = new GRB.ParticleSystem();
     this.physics   = new GRB.PhysicsManager();
@@ -116,17 +121,32 @@ GRB.GameEngine = class {
     this.menu = new GRB.MenuSystem(this.save);
     this.ui   = new GRB.UIManager(this.save, this.menu, this.hud);
 
-    await this.tracker.initialize();
+    console.log('[GameEngine] Initializing hand tracker...');
+    const trackerOk = await this.tracker.initialize();
+    console.log('[GameEngine] Hand tracker initialized:', trackerOk);
+
+    console.log('[GameEngine] Starting camera...');
     const camOk = await this.cam.initialize();
-    if (!camOk) this.ui.showWarning('Camera not available – check permissions', 8000);
+    console.log('[GameEngine] Camera initialization result:', camOk);
+    if (!camOk) {
+      console.error('[GameEngine] Camera failed to start');
+      this.ui.showWarning('Camera failed to start – check permissions and ensure no other app uses camera', 8000);
+    } else {
+      console.log('[GameEngine] Camera started successfully');
+    }
+
+    console.log('[GameEngine] All systems initialized');
 
     if (!this.save.isTutorialDone()) {
+      console.log('[GameEngine] Starting tutorial');
       this._startTutorial();
     } else {
+      console.log('[GameEngine] Going to main menu');
       this._goToMainMenu();
     }
 
     this._lastTs = performance.now();
+    console.log('[GameEngine] Starting game loop');
     requestAnimationFrame((ts) => this._loop(ts));
   }
 
@@ -140,6 +160,18 @@ GRB.GameEngine = class {
   _loop(ts) {
     const dt = Math.min(50, ts - this._lastTs);
     this._lastTs = ts;
+
+    // Track cursor trail (used for red cursor glow-trail in draw mode)
+    if (this.gesture) {
+      const c = this.gesture.getCursor();
+      this._cursorTrail.push({ x: c.x, y: c.y, t: ts });
+      // Keep only 220ms of trail history
+      const cutoff = ts - 220;
+      while (this._cursorTrail.length > 0 && this._cursorTrail[0].t < cutoff) {
+        this._cursorTrail.shift();
+      }
+    }
+
     this._update(dt, ts);
     this._draw();
     requestAnimationFrame((t) => this._loop(t));
@@ -269,9 +301,10 @@ GRB.GameEngine = class {
 
   _updateGesturePanel(gesture, progress) {
     const map = {
-      [GRB.GESTURES.PINCH]:       ['✌️', 'Drawing…'],
+      [GRB.GESTURES.PINCH]:       ['🤏', 'Drawing…'],
       [GRB.GESTURES.THUMBS_UP]:   ['👍', progress > 0 ? 'Hold to Start!' : 'Thumbs Up!'],
-      [GRB.GESTURES.OPEN_PALM]:   ['✋', progress > 0.7 ? 'Undo Road…' : 'Open Palm – Hold'],
+      [GRB.GESTURES.V_SIGN]:      ['✌️', progress > 0.4 ? 'Undo Road…' : 'V Sign – Hold 0.7s'],
+      [GRB.GESTURES.OPEN_PALM]:   ['🙌', progress > 0.6 ? 'Clearing All…' : 'Open Palm – Hold 1.5s'],
       [GRB.GESTURES.PALM_HIGH]:   ['🖐️', 'Hold to Clear All'],
       [GRB.GESTURES.CLOSED_FIST]: ['✊', 'Hold to Pause/Resume'],
     };
@@ -299,6 +332,7 @@ GRB.GameEngine = class {
       case STATE.CAMPAIGN_SELECT:
       case STATE.HIGH_SCORES:
       case STATE.HOW_TO_PLAY:
+      case STATE.SETTINGS:
         this.menu.draw(ctx, this.gesture.getCursor(), this.save); break;
 
       case STATE.DRAW:
@@ -316,18 +350,13 @@ GRB.GameEngine = class {
   _drawGameplay(ctx) {
     const cam = this.camera;
 
-    // World layers
+    // 1. World layers
     this.level.draw(ctx, cam.x, cam.y);
     this.drawing.draw(ctx, cam.x, cam.y);
     if (this.vehicle.chassis) this.vehicle.draw(ctx, cam.x, cam.y);
     this.particles.draw(ctx, cam.x, cam.y);
 
-    // In-world cursor (draw modes)
-    if (this.state === STATE.DRAW || this.state === STATE.ENDLESS_DRAW) {
-      this._drawGameCursor(ctx, this.gesture.getCursor(), this.gesture.getCurrentGesture());
-    }
-
-    // HUD
+    // 2. HUD
     const g      = this.gesture;
     const inSim  = this.state === STATE.SIMULATION || this.state === STATE.ENDLESS_SIM;
     const inDraw = this.state === STATE.DRAW || this.state === STATE.ENDLESS_DRAW;
@@ -349,25 +378,35 @@ GRB.GameEngine = class {
       endlessDistance:this.endlessDistance,
     });
 
-    // Overlay screens
+    // 3. Overlay screens
     const cursor = this.gesture.getCursor();
     if (this.state === STATE.LEVEL_COMPLETE && this._levelResult) {
       const r = this._levelResult;
       this.hud.drawLevelComplete(ctx, r.stars, r.inkPct, r.timeMs, r.isNew);
-      this._drawOverlayCursor(ctx, cursor);
       this._drawSelectionHint(ctx, 'PINCH to continue');
     }
     if (this.state === STATE.GAME_OVER) {
       this.hud.drawGameOver(ctx, this._gameOverReason);
-      this._drawOverlayCursor(ctx, cursor);
       this._drawSelectionHint(ctx, 'PINCH to retry  •  Open Palm for menu');
     }
     if (this.state === STATE.ENDLESS_OVER) {
       this.menu.screen = 'endless_over';
-      this.menu.draw(ctx, cursor, this.save);
+      this.menu.draw(ctx, cursor, this.save); // menu draws its own cursor; return early
+      return;
     }
     if (this.state === STATE.PAUSED) {
-      this._drawPausedOverlay(ctx, cursor);
+      this._drawPausedOverlay(ctx);
+    }
+
+    // 4. Cursor — always drawn LAST so it appears above everything
+    if (inDraw) {
+      this._drawGameCursor(ctx, cursor, g.getCurrentGesture());
+    } else if (
+      this.state === STATE.LEVEL_COMPLETE ||
+      this.state === STATE.GAME_OVER ||
+      this.state === STATE.PAUSED
+    ) {
+      this._drawOverlayCursor(ctx, cursor);
     }
   }
 
@@ -380,32 +419,78 @@ GRB.GameEngine = class {
 
   _drawGameCursor(ctx, c, gesture) {
     if (!c) return;
+    const now = performance.now();
     const isPinch = gesture === GRB.GESTURES.PINCH;
-    const r = isPinch ? 8 : 14;
-    if (isPinch) {
-      const glow = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, 22);
-      glow.addColorStop(0, 'rgba(0,229,255,0.45)');
-      glow.addColorStop(1, 'rgba(0,229,255,0)');
-      ctx.fillStyle = glow;
-      ctx.beginPath(); ctx.arc(c.x, c.y, 22, 0, Math.PI*2); ctx.fill();
+
+    // Trail (last N cursor positions fade out)
+    for (let i = 0; i < this._cursorTrail.length; i++) {
+      const pt = this._cursorTrail[i];
+      const age = (now - pt.t) / 220; // 0=newest, 1=oldest
+      if (age > 1) continue;
+      const alpha = (1 - age) * (isPinch ? 0.55 : 0.35);
+      const r     = (1 - age) * (isPinch ? 7 : 5);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#ff2222';
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, Math.max(1, r), 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
     }
-    ctx.strokeStyle = isPinch ? '#00e5ff' : 'rgba(0,229,255,0.7)';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI*2); ctx.stroke();
-    ctx.fillStyle = '#00e5ff';
-    ctx.beginPath(); ctx.arc(c.x, c.y, 3, 0, Math.PI*2); ctx.fill();
+
+    // Pulsing scale (subtle sine wave)
+    const pulse = 1 + Math.sin(now / 320) * 0.12;
+    const baseR = isPinch ? 10 : 18;
+    const r = baseR * pulse;
+
+    // Outer glow
+    const glowR = r + 14;
+    const glow = ctx.createRadialGradient(c.x, c.y, r * 0.5, c.x, c.y, glowR);
+    glow.addColorStop(0, isPinch ? 'rgba(255,40,40,0.50)' : 'rgba(255,40,40,0.28)');
+    glow.addColorStop(1, 'rgba(255,40,40,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(c.x, c.y, glowR, 0, Math.PI * 2); ctx.fill();
+
+    // White outer ring
+    ctx.strokeStyle = 'rgba(255,255,255,0.90)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI * 2); ctx.stroke();
+
+    // Red fill ring (inner)
+    ctx.strokeStyle = '#ff2222';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(c.x, c.y, r - 3.5, 0, Math.PI * 2); ctx.stroke();
+
+    // Bright red center dot
+    ctx.fillStyle = '#ff2222';
+    ctx.beginPath(); ctx.arc(c.x, c.y, isPinch ? 5 : 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(c.x, c.y, isPinch ? 2 : 1.5, 0, Math.PI * 2); ctx.fill();
   }
 
   _drawOverlayCursor(ctx, c) {
     if (!c) return;
-    ctx.strokeStyle = 'rgba(0,229,255,0.8)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(c.x, c.y, 14, 0, Math.PI*2); ctx.stroke();
-    ctx.fillStyle = '#00e5ff';
-    ctx.beginPath(); ctx.arc(c.x, c.y, 4, 0, Math.PI*2); ctx.fill();
+    const now = performance.now();
+    const pulse = 1 + Math.sin(now / 380) * 0.10;
+    const r = 16 * pulse;
+
+    // Soft glow
+    const glow = ctx.createRadialGradient(c.x, c.y, r * 0.4, c.x, c.y, r + 10);
+    glow.addColorStop(0, 'rgba(255,40,40,0.30)');
+    glow.addColorStop(1, 'rgba(255,40,40,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(c.x, c.y, r + 10, 0, Math.PI * 2); ctx.fill();
+
+    // White ring
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI * 2); ctx.stroke();
+
+    // Red center dot
+    ctx.fillStyle = '#ff2222';
+    ctx.beginPath(); ctx.arc(c.x, c.y, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(c.x, c.y, 2, 0, Math.PI * 2); ctx.fill();
   }
 
   _drawSelectionHint(ctx, text) {
-    // Show dwell progress arc for pinch hold
     const selProg = this.gesture.getSelectionProgress(performance.now());
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
@@ -415,22 +500,21 @@ GRB.GameEngine = class {
 
     if (selProg > 0) {
       const c = this.gesture.getCursor();
-      ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 3;
+      ctx.strokeStyle = '#ff4444'; ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(c.x, c.y, 18, -Math.PI/2, -Math.PI/2 + Math.PI * 2 * selProg);
       ctx.stroke();
     }
   }
 
-  _drawPausedOverlay(ctx, cursor) {
+  _drawPausedOverlay(ctx) {
     ctx.fillStyle = 'rgba(0,0,0,0.62)'; ctx.fillRect(0, 0, CW, CH);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fff'; ctx.font = 'bold 52px "Segoe UI", sans-serif';
     ctx.fillText('PAUSED', 480, 230);
     ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '18px "Segoe UI", sans-serif';
-    ctx.fillText('Closed Fist (hold) to resume', 480, 278);
+    ctx.fillText('✊ Closed Fist (hold 1s) to resume', 480, 278);
     ctx.textAlign = 'left';
-    this._drawOverlayCursor(ctx, cursor);
   }
 
   // ─── Gesture event handler ─────────────────────────────────────────────────
@@ -444,17 +528,18 @@ GRB.GameEngine = class {
         else if (this.state === STATE.ENDLESS_DRAW) this._startEndlessSim();
         break;
 
-      case GRB.GESTURES.OPEN_PALM:
+      case GRB.GESTURES.V_SIGN:
         if (this.state === STATE.DRAW || this.state === STATE.ENDLESS_DRAW) {
-          if (this.drawing.undoLast()) this.ui.showWarning('Road removed!', 1000);
+          if (this.drawing.undoLast()) this.ui.showWarning('✌️ Road removed!', 1000);
           else this.ui.showWarning('Nothing to undo', 800);
         }
         break;
 
+      case GRB.GESTURES.OPEN_PALM:
       case GRB.GESTURES.PALM_HIGH:
         if (this.state === STATE.DRAW || this.state === STATE.ENDLESS_DRAW) {
           this.drawing.clearAll();
-          this.ui.showWarning('All roads cleared!', 1500);
+          this.ui.showWarning('🙌 All roads cleared!', 1500);
         }
         break;
 
@@ -515,9 +600,9 @@ GRB.GameEngine = class {
         }
         break;
 
-      case 4: // Open palm (hold)
-        if (gesture === GRB.GESTURES.OPEN_PALM) {
-          this._tutProg = G.getHoldProgress(GRB.GESTURES.OPEN_PALM);
+      case 4: // V Sign (hold 700ms → undo)
+        if (gesture === GRB.GESTURES.V_SIGN) {
+          this._tutProg = G.getHoldProgress(GRB.GESTURES.V_SIGN);
           if (this._tutProg >= 1) this._tutAdvance();
         } else {
           this._tutProg = Math.max(0, this._tutProg - dt / 400);
@@ -533,13 +618,17 @@ GRB.GameEngine = class {
         break;
     }
     // Update gesture panel for tutorial hints
-    const icons = ['👋','☝️','✌️','👍','✋','🎉'];
+    const icons  = ['👋', '☝️', '🤏', '👍', '✌️', '🎉'];
     const labels = [
-      'Show your hand','Move your finger','Pinch to draw',
-      'Thumbs up – hold','Open palm – hold','All done!'
+      'Show your hand',
+      'Move your finger',
+      'Pinch to draw',
+      'Thumbs up – hold 1s',
+      'V sign – hold 0.7s',
+      'All done!'
     ];
     if (typeof window._GRB_gestureUpdate === 'function') {
-      window._GRB_gestureUpdate(icons[this._tutStep]||'', labels[this._tutStep]||'', this._tutProg);
+      window._GRB_gestureUpdate(icons[this._tutStep] || '', labels[this._tutStep] || '', this._tutProg);
     }
   }
 
@@ -555,7 +644,8 @@ GRB.GameEngine = class {
     return this.state === STATE.MAIN_MENU
         || this.state === STATE.CAMPAIGN_SELECT
         || this.state === STATE.HIGH_SCORES
-        || this.state === STATE.HOW_TO_PLAY;
+        || this.state === STATE.HOW_TO_PLAY
+        || this.state === STATE.SETTINGS;
   }
 
   _goToMainMenu() {
@@ -575,6 +665,12 @@ GRB.GameEngine = class {
       case 'howtoplay':
         this.menu.setScreen('how_to_play');
         this.state = STATE.HOW_TO_PLAY; break;
+      case 'settings':
+        this.menu.setScreen('settings');
+        this.state = STATE.SETTINGS; break;
+      case 'toggle_camera':
+        this.ui.toggleCameraPreview();
+        break; // stay on settings screen
       case 'back':       this._goToMainMenu(); break;
       case 'resume':
         this.state = this.isEndless ? STATE.ENDLESS_SIM : STATE.SIMULATION; break;

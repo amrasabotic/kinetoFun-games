@@ -98,12 +98,13 @@ GRB.HUD = class {
   }
 
   _drawDrawModeHint(ctx) {
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.beginPath(); ctx.roundRect(960/2 - 140, 510 - 22, 280, 28, 8); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    const text = '🤏 Pinch to draw  •  👍 Thumbs Up to start  •  ✌️ V Sign to undo';
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.beginPath(); ctx.roundRect(960/2 - 220, 510 - 24, 440, 30, 8); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.72)';
     ctx.font = '12px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('PINCH to draw roads  •  THUMBS UP to start', 960/2, 510 - 5);
+    ctx.fillText(text, 960/2, 510 - 5);
     ctx.textAlign = 'left';
   }
 
@@ -142,7 +143,7 @@ GRB.HUD = class {
     ctx.fillText('PAUSED', 480, 250);
     ctx.font = '20px "Segoe UI", sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.fillText('CLOSED FIST to resume', 480, 290);
+    ctx.fillText('✊ Closed Fist (hold 1s) to resume', 480, 290);
     ctx.textAlign = 'left';
   }
 
@@ -150,11 +151,12 @@ GRB.HUD = class {
     if (!gesture || gesture === 'none') return;
 
     const icons = {
-      pinch:        { icon:'✌️', label:'Drawing…' },
-      open_palm:    { icon:'✋', label:progress > 0.7 ? 'Undo Last Road' : 'Open Palm – Hold' },
-      palm_high:    { icon:'🖐️', label:'Hold to Clear All' },
-      closed_fist:  { icon:'✊', label:'Hold to Pause' },
-      thumbs_up:    { icon:'👍', label:'Hold to Start!' }
+      pinch:        { icon:'🤏', label:'Drawing…' },
+      v_sign:       { icon:'✌️', label: progress > 0.4 ? 'Undo Road…' : 'V Sign – Hold 0.7s' },
+      open_palm:    { icon:'🙌', label: progress > 0.6 ? 'Clearing All…' : 'Open Palm – Hold 1.5s' },
+      palm_high:    { icon:'🖐️', label:'Open Palm – Hold to Clear' },
+      closed_fist:  { icon:'✊', label: progress > 0 ? 'Hold to Pause…' : 'Fist Detected' },
+      thumbs_up:    { icon:'👍', label: progress > 0 ? 'Hold to Start!' : 'Thumbs Up!' }
     };
     const info = icons[gesture];
     if (!info) return;
@@ -235,7 +237,7 @@ GRB.HUD = class {
     ctx.fillText(reason || 'Vehicle crashed!', 480, 255);
     ctx.fillStyle = '#94a3b8';
     ctx.font = '14px "Segoe UI", sans-serif';
-    ctx.fillText('PINCH Retry  •  Open Palm for Menu', 480, 310);
+    ctx.fillText('PINCH to Retry  •  Open Palm to go to Menu', 480, 310);
     ctx.textAlign = 'left';
   }
 };

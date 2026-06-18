@@ -15,22 +15,69 @@ GRB.CameraManager = class {
       console.error('[CameraManager] MediaPipe Camera Utils not loaded');
       return false;
     }
+
+    // Ensure video element is properly configured
+    this.video.setAttribute('autoplay', 'true');
+    this.video.setAttribute('muted', 'true');
+    this.video.setAttribute('playsinline', 'true');
+    this.video.style.visibility = 'visible';
+    this.video.style.width = '320px';
+    this.video.style.height = '240px';
+
+    console.log('[CameraManager] Video element configured:', {
+      autoplay: this.video.autoplay,
+      muted: this.video.muted,
+      readyState: this.video.readyState,
+      networkState: this.video.networkState
+    });
+
     return new Promise((resolve) => {
-      this.mpCamera = new Camera(this.video, {
-        onFrame: async () => {
-          if (this.onFrameCallback) await this.onFrameCallback(this.video);
-          this._drawPreview();
-        },
-        width: 320,
-        height: 240,
-        facingMode: 'user'
-      });
-      this.mpCamera.start()
-        .then(() => { this.ready = true; resolve(true); })
-        .catch(err => {
-          console.error('[CameraManager] Camera start failed:', err);
-          resolve(false);
-        });
+      try {
+        const cameraConfig = {
+          onFrame: async () => {
+            if (this.onFrameCallback) {
+              try {
+                await this.onFrameCallback(this.video);
+              } catch (e) {
+                console.warn('[CameraManager] onFrame callback error:', e);
+              }
+            }
+            this._drawPreview();
+          },
+          width: 320,
+          height: 240,
+          facingMode: 'user'
+        };
+
+        console.log('[CameraManager] Creating Camera with config:', cameraConfig);
+        this.mpCamera = new Camera(this.video, cameraConfig);
+
+        console.log('[CameraManager] Calling camera.start()...');
+        this.mpCamera.start()
+          .then(() => {
+            console.log('[CameraManager] ✓ Camera started successfully');
+            this.ready = true;
+            resolve(true);
+          })
+          .catch(err => {
+            console.error('[CameraManager] ✗ Camera.start() failed');
+            console.error('Error name:', err.name);
+            console.error('Error message:', err.message);
+            console.error('Full error:', err);
+
+            // Try to provide helpful suggestions
+            if (err.name === 'NotReadableError') {
+              console.error('→ This usually means: camera is in use by another app, or browser lacks permission');
+            } else if (err.name === 'NotAllowedError') {
+              console.error('→ This usually means: user denied camera permission');
+            }
+
+            resolve(false);
+          });
+      } catch (err) {
+        console.error('[CameraManager] Camera initialization error:', err);
+        resolve(false);
+      }
     });
   }
 

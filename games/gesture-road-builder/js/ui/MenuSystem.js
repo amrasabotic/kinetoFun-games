@@ -5,10 +5,11 @@ const BTN = (id, label, x, y, w=220, h=52) => ({ id, label, x, y, w, h });
 
 const SCREENS = {
   main: [
-    BTN('campaign',    'Campaign',    480, 220),
-    BTN('endless',     'Endless',     480, 288),
-    BTN('highscores',  'High Scores', 480, 356),
-    BTN('howtoplay',   'How To Play', 480, 424),
+    BTN('campaign',    'Campaign',    480, 200),
+    BTN('endless',     'Endless',     480, 264),
+    BTN('highscores',  'High Scores', 480, 328),
+    BTN('howtoplay',   'How To Play', 480, 392),
+    BTN('settings',    'Settings',    480, 456, 220, 44),
   ],
   campaign_select: [], // generated dynamically
   highscores: [
@@ -16,6 +17,10 @@ const SCREENS = {
   ],
   howtoplay: [
     BTN('back', '← Back', 480, 490),
+  ],
+  settings: [
+    BTN('toggle_camera', 'Camera Preview: ON', 480, 260, 280, 56),
+    BTN('back', '← Back', 480, 370, 220, 48),
   ],
   level_complete: [
     BTN('next',    'Next Level',   380, 390),
@@ -77,6 +82,12 @@ GRB.MenuSystem = class {
 
   _getItems() {
     if (this.screen === 'campaign_select') return this._campaignItems();
+    if (this.screen === 'settings') {
+      return [
+        BTN('toggle_camera', 'Camera Preview', 480, 200, 300, 58),
+        BTN('back', '← Back', 480, 360, 220, 48)
+      ];
+    }
     return SCREENS[this.screen] || SCREENS.main;
   }
 
@@ -103,6 +114,7 @@ GRB.MenuSystem = class {
       case 'campaign_select': this._drawCampaignSelect(ctx, cursor, saveSystem); break;
       case 'highscores':      this._drawHighScores(ctx, cursor, saveSystem); break;
       case 'howtoplay':       this._drawHowToPlay(ctx, cursor); break;
+      case 'settings':        this._drawSettings(ctx, cursor, saveSystem); break;
       case 'level_complete':  break; // drawn by HUD
       case 'game_over':       break;
       case 'paused':          this._drawPausedMenu(ctx, cursor); break;
@@ -200,7 +212,7 @@ GRB.MenuSystem = class {
     ctx.fillStyle = locked ? 'rgba(255,255,255,0.05)'
       : hovered ? '#1e3a5f' : 'rgba(255,255,255,0.08)';
     ctx.beginPath(); ctx.roundRect(-W/2, -H/2, W, H, 8); ctx.fill();
-    ctx.strokeStyle = hovered ? '#00e5ff' : locked ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.2)';
+    ctx.strokeStyle = hovered ? '#ff4444' : locked ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.2)';
     ctx.lineWidth = hovered ? 2 : 1;
     ctx.stroke();
 
@@ -270,33 +282,131 @@ GRB.MenuSystem = class {
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 28px "Segoe UI", sans-serif';
-    ctx.fillText('How To Play', 480, 60);
+    ctx.fillText('How To Play', 480, 52);
+
+    // Subtitle
+    ctx.fillStyle = 'rgba(255,255,255,0.42)';
+    ctx.font = '13px "Segoe UI", sans-serif';
+    ctx.fillText('👉 Move cursor with your index fingertip', 480, 80);
 
     const gestures = [
-      ['✌️', 'Pinch', 'Hold thumb+index together to draw roads'],
-      ['👍', 'Thumbs Up', 'Hold 1 second to start the vehicle'],
-      ['✋', 'Open Palm', 'Hold 1.5s to undo last road drawn'],
-      ['🖐️', 'Palm High', 'Raise hand high + hold 2s to clear all'],
-      ['✊', 'Closed Fist', 'Hold 1 second to pause / resume'],
+      { icon: '🤏', name: 'Pinch',         hold: '',        desc: 'Pinch thumb + index and move to draw a road' },
+      { icon: '👍', name: 'Thumbs Up',     hold: '1 s',     desc: 'Hold 1 second to launch the vehicle' },
+      { icon: '✌️', name: 'V Sign',         hold: '0.7 s',   desc: 'Peace sign — hold 0.7s to undo last road' },
+      { icon: '🙌', name: 'Open Palm',     hold: '1.5 s',   desc: 'Open all fingers — hold 1.5s to clear all roads' },
+      { icon: '✊', name: 'Closed Fist',   hold: '1 s',     desc: 'Hold 1 second to pause or resume' },
     ];
 
-    let cy = 110;
-    for (const [icon, name, desc] of gestures) {
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.beginPath(); ctx.roundRect(240, cy - 10, 480, 50, 8); ctx.fill();
-      ctx.font = '26px sans-serif'; ctx.fillText(icon, 280, cy + 24);
+    let cy = 108;
+    for (const g2 of gestures) {
+      // Row background
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.beginPath(); ctx.roundRect(220, cy - 8, 520, 54, 10); ctx.fill();
+
+      // Icon
+      ctx.font = '28px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(g2.icon, 270, cy + 26);
+
+      // Hold badge
+      if (g2.hold) {
+        ctx.fillStyle = 'rgba(255,80,80,0.25)';
+        ctx.beginPath(); ctx.roundRect(640, cy + 6, 72, 22, 6); ctx.fill();
+        ctx.fillStyle = '#ff8888';
+        ctx.font = 'bold 11px "Segoe UI", sans-serif';
+        ctx.fillText(g2.hold, 676, cy + 21);
+      }
+
+      // Name + description
+      ctx.textAlign = 'left';
       ctx.fillStyle = '#00e5ff';
       ctx.font = 'bold 15px "Segoe UI", sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(name, 320, cy + 14);
-      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      ctx.fillText(g2.name, 308, cy + 18);
+      ctx.fillStyle = 'rgba(255,255,255,0.62)';
       ctx.font = '13px "Segoe UI", sans-serif';
-      ctx.fillText(desc, 320, cy + 32);
+      ctx.fillText(g2.desc, 308, cy + 36);
+
       ctx.textAlign = 'center';
-      cy += 62;
+      cy += 64;
     }
 
     this._drawButtons(ctx, SCREENS.howtoplay, cursor);
+    ctx.textAlign = 'left';
+  }
+
+  _drawSettings(ctx, cursor, saveSystem) {
+    const g = ctx.createLinearGradient(0, 0, 0, 540);
+    g.addColorStop(0, '#0d1b2a'); g.addColorStop(1, '#1a2744');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 960, 540);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 32px "Segoe UI", sans-serif';
+    ctx.fillText('Settings', 480, 80);
+
+    // Section header
+    ctx.fillStyle = '#00e5ff';
+    ctx.font = 'bold 14px "Segoe UI", sans-serif';
+    ctx.fillText('DISPLAY', 480, 140);
+
+    // Camera preview option — label updates dynamically from save
+    const camOn = saveSystem.get('settings.showCameraPreview', true);
+    const camItems = [
+      BTN('toggle_camera',
+        `📷  Camera Preview: ${camOn ? 'ON' : 'OFF'}`,
+        480, 200, 300, 58)
+    ];
+
+    // Draw the toggle button with colored state indicator
+    for (const item of camItems) {
+      const hovered = this.hoveredId === item.id;
+      const x = item.x - item.w / 2, y = item.y - item.h / 2;
+
+      ctx.shadowColor = hovered ? '#ff4444' : 'transparent';
+      ctx.shadowBlur = hovered ? 16 : 0;
+
+      // Base
+      ctx.fillStyle = hovered ? '#ff4444' : 'rgba(255,255,255,0.07)';
+      ctx.beginPath(); ctx.roundRect(x, y, item.w, item.h, 10); ctx.fill();
+      ctx.strokeStyle = hovered ? '#ff4444' : 'rgba(255,255,255,0.18)';
+      ctx.lineWidth = hovered ? 2 : 1;
+      ctx.stroke();
+
+      // Pill indicator (ON = green, OFF = red)
+      const pillX = x + item.w - 52, pillY = y + item.h / 2 - 10;
+      ctx.fillStyle = camOn ? '#00e676' : '#ff4444';
+      ctx.beginPath(); ctx.roundRect(pillX, pillY, 44, 20, 10); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px "Segoe UI", sans-serif';
+      ctx.fillText(camOn ? 'ON' : 'OFF', pillX + 22, pillY + 14);
+
+      // Label
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = hovered ? '#fff' : '#fff';
+      ctx.font = 'bold 16px "Segoe UI", sans-serif';
+      ctx.fillText('Camera Preview', item.x - 18, item.y + 6);
+
+      // Selection ring
+      if (hovered && this._selProgress > 0) {
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(item.x, item.y, item.h * 0.44, -Math.PI / 2,
+          -Math.PI / 2 + Math.PI * 2 * this._selProgress);
+        ctx.stroke();
+      }
+    }
+
+    // Description text
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.font = '13px "Segoe UI", sans-serif';
+    ctx.fillText(
+      camOn
+        ? 'Hand tracking preview is visible in top-right corner'
+        : 'Preview hidden — tracking continues in background',
+      480, 268
+    );
+
+    this._drawButtons(ctx, [BTN('back', '← Back', 480, 360, 220, 48)], cursor);
     ctx.textAlign = 'left';
   }
 
@@ -336,15 +446,15 @@ GRB.MenuSystem = class {
       const y = item.y - item.h / 2;
 
       // Shadow
-      ctx.shadowColor = hovered ? '#00e5ff' : 'transparent';
+      ctx.shadowColor = hovered ? '#ff4444' : 'transparent';
       ctx.shadowBlur  = hovered ? 18 : 0;
 
       // Background
-      ctx.fillStyle = hovered ? '#00e5ff' : 'rgba(255,255,255,0.08)';
+      ctx.fillStyle = hovered ? '#ff3333' : 'rgba(255,255,255,0.08)';
       ctx.beginPath(); ctx.roundRect(x, y, item.w, item.h, 10); ctx.fill();
 
       // Border
-      ctx.strokeStyle = hovered ? '#00e5ff' : 'rgba(255,255,255,0.2)';
+      ctx.strokeStyle = hovered ? '#ff6666' : 'rgba(255,255,255,0.2)';
       ctx.lineWidth = hovered ? 2 : 1;
       ctx.stroke();
 
@@ -359,7 +469,7 @@ GRB.MenuSystem = class {
       }
 
       ctx.shadowBlur = 0;
-      ctx.fillStyle = hovered ? '#000' : '#fff';
+      ctx.fillStyle = '#fff';
       ctx.font = `bold ${item.h > 44 ? 17 : 14}px "Segoe UI", sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillText(item.label, item.x, item.y + 6);
@@ -369,13 +479,32 @@ GRB.MenuSystem = class {
 
   _drawCursor(ctx, cursor) {
     const { x, y } = cursor;
-    // Outer ring
-    ctx.strokeStyle = 'rgba(0,229,255,0.6)';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(x, y, 16, 0, Math.PI * 2); ctx.stroke();
-    // Inner dot
-    ctx.fillStyle = '#00e5ff';
+    const now = performance.now();
+    const pulse = 1 + Math.sin(now / 350) * 0.10;
+    const r = 16 * pulse;
+
+    // Soft red glow
+    const glow = ctx.createRadialGradient(x, y, r * 0.3, x, y, r + 10);
+    glow.addColorStop(0, 'rgba(255,40,40,0.28)');
+    glow.addColorStop(1, 'rgba(255,40,40,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(x, y, r + 10, 0, Math.PI * 2); ctx.fill();
+
+    // White outer ring
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+
+    // Red inner ring
+    ctx.strokeStyle = 'rgba(255,40,40,0.75)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(x, y, r - 4, 0, Math.PI * 2); ctx.stroke();
+
+    // Red center dot
+    ctx.fillStyle = '#ff2222';
     ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fill();
   }
 
   handleScroll(dy) {
