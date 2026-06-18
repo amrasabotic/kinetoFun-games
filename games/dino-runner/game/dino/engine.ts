@@ -137,17 +137,46 @@ function spawnCloud(state: GameState): Cloud {
 }
 
 // ── Collision ─────────────────────────────────────────────────────────────────
+//
+// All hitboxes use ABSOLUTE pixel insets from the sprite edges so the box can
+// be tuned independently of sprite dimensions.  The player box intentionally
+// excludes the leg area (bottom ~16 px) so the character can skim over the top
+// of an obstacle without an unfair kill.
 
-function hitbox(e: { x: number; y: number; width: number; height: number }, pad: number) {
-  const px = e.width * pad;
-  const py = e.height * pad;
-  return { x: e.x + px, y: e.y + py, w: e.width - px * 2, h: e.height - py * 2 };
+interface Box { x: number; y: number; w: number; h: number; }
+
+function playerHitbox(p: Player): Box {
+  if (p.state === 'ducking') {
+    // Ducking sprite is wide and short — tight box, exclude edge decoration
+    return { x: p.x + 6, y: p.y + 6, w: p.width - 12, h: p.height - 10 };
+  }
+  // Running / jumping: exclude legs (bottom 16 px) and thin side margins.
+  // This prevents the player from dying when only their feet brush the cactus tip.
+  return { x: p.x + 7, y: p.y + 4, w: p.width - 14, h: p.height - 20 };
+}
+
+function obstacleHitbox(obs: Obstacle): Box {
+  switch (obs.type) {
+    case 'cactus-small':
+      return { x: obs.x + 3, y: obs.y + 2, w: obs.width - 6,  h: obs.height - 2  };
+    case 'cactus-medium':
+      return { x: obs.x + 3, y: obs.y + 2, w: obs.width - 6,  h: obs.height - 2  };
+    case 'cactus-large':
+      return { x: obs.x + 5, y: obs.y + 2, w: obs.width - 10, h: obs.height - 2  };
+    case 'bird':
+      // Bird hitbox excludes wingtips and beak for a tighter, fairer core body
+      return { x: obs.x + 8, y: obs.y + 5, w: obs.width - 16, h: obs.height - 10 };
+  }
 }
 
 function collides(player: Player, obs: Obstacle): boolean {
-  const p = hitbox(player, 0.15);
-  const o = hitbox(obs, 0.08);
-  return p.x < o.x + o.w && p.x + p.w > o.x && p.y < o.y + o.h && p.y + p.h > o.y;
+  const p = playerHitbox(player);
+  const o = obstacleHitbox(obs);
+
+  // Require genuine overlap (≥ 2 px in both axes) — eliminates pixel-touch false positives
+  const overlapX = Math.min(p.x + p.w, o.x + o.w) - Math.max(p.x, o.x);
+  const overlapY = Math.min(p.y + p.h, o.y + o.h) - Math.max(p.y, o.y);
+  return overlapX >= 2 && overlapY >= 2;
 }
 
 // ── Main update (mutates state in place for 60 fps performance) ───────────────
@@ -200,20 +229,17 @@ export function updateGame(state: GameState, gesture: GestureState): void {
         player.width = PLAYER_RUN_WIDTH;
         player.height = PLAYER_RUN_HEIGHT;
       }
-      // Landing bounce
+      // Landing bounce — small upward visual pop, decays exponentially via the block below
       player.bounceOffset = 5;
-      player.bounceVelocity = -0.5;
+      player.bounceVelocity = 0;
     }
   }
 
-  // Landing bounce decay
+  // Landing bounce decay — exponential so offset always converges to 0
   if (player.bounceOffset > 0) {
-    player.bounceVelocity += 0.18;
-    player.bounceOffset += player.bounceVelocity;
-    if (player.bounceOffset <= 0) {
-      player.bounceOffset = 0;
-      player.bounceVelocity = 0;
-    }
+    player.bounceOffset *= 0.65;
+    player.bounceVelocity = 0;
+    if (player.bounceOffset < 0.5) player.bounceOffset = 0;
   }
 
   // ── Run animation ────────────────────────────────────────────────────────

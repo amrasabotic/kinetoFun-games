@@ -27,6 +27,8 @@ export default function DinoGame() {
   const prevGestureRef = useRef<GestureState>('none');
   const prevPhaseRef = useRef<GamePhase>('idle');
   const prevMilestoneRef = useRef(0);
+  // Tracks the previous gesture specifically for UI edge detection (start/restart)
+  const prevGestureForUIRef = useRef<GestureState>('none');
 
   // ── Gesture hook ─────────────────────────────────────────────────────────
   const { gestureState, rawGestureName, confidence, videoRef, isReady, error } =
@@ -69,6 +71,18 @@ export default function DinoGame() {
     setDisplayHighScore(hs);
     setPhase('running');
   }, []);
+
+  // ── Gesture-driven UI triggers (start / restart on open-palm rising edge) ─
+  useEffect(() => {
+    const prev = prevGestureForUIRef.current;
+    prevGestureForUIRef.current = gestureState;
+
+    // Only fire on the rising edge (gesture just became 'jump')
+    if (gestureState !== 'jump' || prev === 'jump') return;
+
+    if (phase === 'idle' && isReady) handleStart();
+    else if (phase === 'gameover') handleRestart();
+  }, [gestureState, phase, isReady, handleStart, handleRestart]);
 
   // ── Game loop (runs at ~60 fps while phase === 'running') ─────────────────
   const gameLoop = useCallback(() => {

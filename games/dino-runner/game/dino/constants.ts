@@ -10,9 +10,9 @@ export const PLAYER_RUN_HEIGHT = 54;
 export const PLAYER_DUCK_WIDTH = 64;
 export const PLAYER_DUCK_HEIGHT = 34;
 
-// Physics
-export const GRAVITY = 0.9;
-export const JUMP_VELOCITY = -17;
+// Physics — tuned to Chrome Dino feel: smooth arc, predictable clearance
+export const GRAVITY = 0.6;
+export const JUMP_VELOCITY = -12;
 
 // Speed
 export const INITIAL_SPEED = 6;

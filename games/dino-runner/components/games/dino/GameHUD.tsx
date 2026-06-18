@@ -115,17 +115,22 @@ function StartScreen({
         <GestureCard emoji="✊" label="Closed Fist" action="DUCK" color="bg-yellow-100 border-yellow-300" />
       </div>
 
-      {/* Start button */}
+      {/* Start trigger */}
       {error ? (
         <p className="text-sm text-red-500 max-w-xs text-center">{error}</p>
       ) : isReady ? (
-        <button
-          onClick={onStart}
-          className="px-8 py-3 bg-gray-800 text-white font-bold tracking-widest text-sm rounded-none border-2 border-gray-800 hover:bg-white hover:text-gray-800 transition-colors"
-          style={{ fontFamily: '"Courier New", monospace' }}
-        >
-          START
-        </button>
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-sm font-bold tracking-widest text-gray-700 animate-pulse" style={{ fontFamily: '"Courier New", monospace' }}>
+            ✋ OPEN PALM TO START
+          </p>
+          <button
+            disabled
+            style={{ pointerEvents: 'none', fontFamily: '"Courier New", monospace' }}
+            className="px-8 py-3 bg-gray-300 text-gray-500 font-bold tracking-widest text-sm rounded-none border-2 border-gray-300 cursor-default"
+          >
+            START
+          </button>
+        </div>
       ) : (
         <p className="text-sm text-gray-400 animate-pulse" style={{ fontFamily: '"Courier New", monospace' }}>
           Initializing camera…
@@ -182,13 +187,18 @@ function GameOverScreen({
         <ScoreBadge label={isNewBest ? '🏆 BEST' : 'BEST'} value={highScore} highlight={isNewBest} />
       </div>
 
-      <button
-        onClick={onRestart}
-        className="px-8 py-3 bg-gray-800 text-white font-bold tracking-widest text-sm rounded-none border-2 border-gray-800 hover:bg-white hover:text-gray-800 transition-colors"
-        style={{ fontFamily: '"Courier New", monospace' }}
-      >
-        RESTART
-      </button>
+      <div className="flex flex-col items-center gap-2">
+        <p className="text-sm font-bold tracking-widest text-gray-700 animate-pulse" style={{ fontFamily: '"Courier New", monospace' }}>
+          ✋ OPEN PALM TO RESTART
+        </p>
+        <button
+          disabled
+          style={{ pointerEvents: 'none', fontFamily: '"Courier New", monospace' }}
+          className="px-8 py-3 bg-gray-300 text-gray-500 font-bold tracking-widest text-sm rounded-none border-2 border-gray-300 cursor-default"
+        >
+          RESTART
+        </button>
+      </div>
     </div>
   );
 }

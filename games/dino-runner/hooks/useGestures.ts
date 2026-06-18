@@ -3,10 +3,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { GestureState } from '@/game/dino/types';
 import { GestureSmoother } from '@/utils/dino/smoothing';
 
-const WASM_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
-const MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
-const CONFIDENCE_THRESHOLD = 0.72;
+const CONFIDENCE_THRESHOLD = 0.5;
 
 export interface GesturesOutput {
   gestureState: GestureState;
@@ -17,22 +14,18 @@ export interface GesturesOutput {
   error: string | null;
 }
 
-function mapName(name: string): GestureState {
-  if (name === 'Open_Palm') return 'jump';
-  if (name === 'Closed_Fist') return 'duck';
-  return 'none';
-}
-
-// Wait for MediaPipe scripts to load on window
+// Wait for MediaPipe Hands to load
 function waitForMediaPipe(timeout = 30000): Promise<void> {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const check = () => {
       const w = window as unknown as Record<string, unknown>;
-      if (w.FilesetResolver && w.GestureRecognizer) {
+      if (w.Hands && w.Camera) {
+        console.log('[MediaPipe] ✓ Hands API ready');
         resolve();
       } else if (Date.now() - start > timeout) {
-        reject(new Error('Timeout waiting for MediaPipe to load'));
+        console.error('[MediaPipe] ✗ Timeout after', Date.now() - start, 'ms');
+        reject(new Error('Timeout waiting for MediaPipe Hands to load'));
       } else {
         setTimeout(check, 100);
       }
@@ -41,9 +34,39 @@ function waitForMediaPipe(timeout = 30000): Promise<void> {
   });
 }
 
+// Detect gesture from hand landmarks
+// Landmarks: thumb, index, middle, ring, pinky fingers
+// Open palm: fingers spread, distance from palm center is large
+// Closed fist: fingers curled, distance from palm center is small
+function detectGestureFromHand(landmarks: Array<{ x: number; y: number; z: number }>): GestureState {
+  if (!landmarks || landmarks.length < 21) return 'none';
+
+  // Palm center (wrist is at index 0)
+  const palm = landmarks[0];
+
+  // Fingertips: index=8, middle=12, ring=16, pinky=20
+  const fingertips = [landmarks[8], landmarks[12], landmarks[16], landmarks[20]];
+
+  // Measure average distance from palm to fingertips
+  const distances = fingertips.map(tip => {
+    const dx = tip.x - palm.x;
+    const dy = tip.y - palm.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  });
+
+  const avgDistance = distances.reduce((a, b) => a + b, 0) / distances.length;
+
+  // High distance = fingers extended = open palm (jump)
+  // Low distance = fingers curled = fist (duck)
+  if (avgDistance > 0.25) return 'jump';  // Open palm
+  if (avgDistance < 0.15) return 'duck';  // Fist
+  return 'none';
+}
+
 export function useGestures(enabled: boolean): GesturesOutput {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const recognizerRef = useRef<unknown>(null);
+  const handsRef = useRef<unknown>(null);
+  const cameraRef = useRef<unknown>(null);
   const rafRef = useRef<number>(0);
   const streamRef = useRef<MediaStream | null>(null);
   const smootherRef = useRef(new GestureSmoother());
@@ -61,102 +84,125 @@ export function useGestures(enabled: boolean): GesturesOutput {
 
     async function init() {
       try {
-        // Wait for MediaPipe scripts to load from CDN (loaded in layout.tsx)
+        console.log('[useGestures] Starting initialization...');
         await waitForMediaPipe();
         if (cancelled) return;
 
         const w = window as unknown as {
-          FilesetResolver: { forVisionTasks: (path: string) => Promise<unknown> };
-          GestureRecognizer: {
-            createFromOptions: (fileset: unknown, opts: unknown) => Promise<{
-              recognizeForVideo: (video: HTMLVideoElement, ts: number) => {
-                gestures?: Array<Array<{ categoryName: string; score: number }>>;
-              };
-              close: () => void;
-            }>;
+          Hands: {
+            Hand: new () => {
+              setOptions: (opts: unknown) => void;
+              onResults: (results: unknown) => void;
+            };
+          };
+          Camera: new (video: HTMLVideoElement, opts: unknown) => {
+            start: () => void;
+            stop: () => void;
           };
         };
 
-        const fileset = await w.FilesetResolver.forVisionTasks(WASM_CDN);
-        if (cancelled) return;
+        console.log('[useGestures] Creating Hands detector...');
+        const hands = new w.Hands({
+          locateFile: (file: string) =>
+            `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`,
+        });
 
-        const recognizer = await w.GestureRecognizer.createFromOptions(fileset, {
-          baseOptions: {
-            modelAssetPath: MODEL_URL,
-            delegate: 'GPU',
-          },
-          runningMode: 'VIDEO',
-          numHands: 1,
-          minHandDetectionConfidence: 0.5,
-          minHandPresenceConfidence: 0.5,
+        hands.setOptions({
+          maxNumHands: 1,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.5,
           minTrackingConfidence: 0.5,
         });
 
-        if (cancelled) { recognizer.close(); return; }
-        recognizerRef.current = recognizer;
+        const video = videoRef.current;
+        if (!video) throw new Error('Video element not found');
 
+        console.log('[useGestures] Requesting camera...');
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } },
           audio: false,
         });
-        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        if (cancelled) {
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
         streamRef.current = stream;
+        video.srcObject = stream;
 
-        const video = videoRef.current;
-        if (video) {
-          video.srcObject = stream;
-          await new Promise<void>(resolve => { video.onloadedmetadata = () => resolve(); });
-          await video.play();
+        console.log('[useGestures] Setting up results handler...');
+        hands.onResults((results: unknown) => {
+          if (cancelled) return;
+
+          const r = results as {
+            multiHandLandmarks?: Array<Array<{ x: number; y: number; z: number }>>;
+            multiHandedness?: Array<{ score: number }>;
+          };
+
+          if (!r.multiHandLandmarks || r.multiHandLandmarks.length === 0) {
+            const smoothed = smootherRef.current.update('none');
+            setGestureState(smoothed);
+            setRawGestureName('');
+            setConfidence(0);
+            return;
+          }
+
+          const landmarks = r.multiHandLandmarks[0];
+          const handedness = r.multiHandedness?.[0];
+          const conf = handedness?.score ?? 0;
+
+          if (conf < CONFIDENCE_THRESHOLD) {
+            const smoothed = smootherRef.current.update('none');
+            setGestureState(smoothed);
+            setRawGestureName('');
+            setConfidence(0);
+            return;
+          }
+
+          const raw = detectGestureFromHand(landmarks);
+          const smoothed = smootherRef.current.update(raw);
+
+          const gestureName =
+            raw === 'jump'
+              ? 'Open_Palm'
+              : raw === 'duck'
+                ? 'Closed_Fist'
+                : 'None';
+
+          setGestureState(smoothed);
+          setRawGestureName(gestureName);
+          setConfidence(conf);
+        });
+
+        handsRef.current = hands;
+
+        console.log('[useGestures] Starting camera with Hands detector...');
+        const camera = new w.Camera(video, {
+          onFrame: async () => {
+            if (!handsRef.current) return;
+            const h = handsRef.current as {
+              send: (opts: unknown) => Promise<void>;
+            };
+            await h.send({ image: video });
+          },
+        });
+
+        cameraRef.current = camera;
+        camera.start();
+
+        if (cancelled) {
+          camera.stop();
+          return;
         }
 
-        if (cancelled) return;
+        console.log('[useGestures] ✓ Fully initialized');
         setIsReady(true);
-        startLoop();
       } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error('[useGestures] ✗ Error:', errMsg, err);
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Camera / MediaPipe init failed');
+          setError(errMsg);
         }
       }
-    }
-
-    function startLoop() {
-      let lastVideoTime = -1;
-
-      const rec = recognizerRef.current as {
-        recognizeForVideo: (v: HTMLVideoElement, ts: number) => {
-          gestures?: Array<Array<{ categoryName: string; score: number }>>;
-        };
-      };
-
-      function detect() {
-        if (cancelled) return;
-
-        const video = videoRef.current;
-        if (video && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
-          lastVideoTime = video.currentTime;
-          try {
-            const result = rec.recognizeForVideo(video, performance.now());
-            if (result.gestures && result.gestures.length > 0) {
-              const top = result.gestures[0][0];
-              const raw: GestureState =
-                top.score >= CONFIDENCE_THRESHOLD ? mapName(top.categoryName) : 'none';
-              const smoothed = smootherRef.current.update(raw);
-              setGestureState(smoothed);
-              setRawGestureName(top.categoryName);
-              setConfidence(top.score);
-            } else {
-              const smoothed = smootherRef.current.update('none');
-              setGestureState(smoothed);
-              setRawGestureName('');
-              setConfidence(0);
-            }
-          } catch { /* detection errors are transient */ }
-        }
-
-        rafRef.current = requestAnimationFrame(detect);
-      }
-
-      rafRef.current = requestAnimationFrame(detect);
     }
 
     init();
@@ -164,7 +210,7 @@ export function useGestures(enabled: boolean): GesturesOutput {
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafRef.current);
-      (recognizerRef.current as { close?: () => void } | null)?.close?.();
+      (cameraRef.current as { stop?: () => void } | null)?.stop?.();
       streamRef.current?.getTracks().forEach(t => t.stop());
       smootherRef.current.reset();
     };
